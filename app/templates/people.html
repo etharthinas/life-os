@@ -24,10 +24,12 @@
   </span>
 </header>
 
-<form id="people-filters" class="search-bar" action="/people" hx-get="/people" hx-trigger="input changed delay:250ms from:#people-filters input[type=search], change from:#people-filters input[type=radio], change from:#people-filters select, submit" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-push-url="true">
+<form id="people-filters" class="search-bar" action="/people" hx-get="/people" hx-trigger="change from:#people-filters input[type=radio], change from:#people-filters select, submit" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-push-url="true">
   <div class="search-field">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
-    <input id="people-q" type="search" name="q" value="{{ q }}" placeholder="Search names and nicknames" autocomplete="off">
+    {# Typing refreshes only the results: swapping the box itself while you type loses the cursor and breaks 한글 composition. #}
+    <input id="people-q" type="search" name="q" value="{{ q }}" placeholder="Search names and nicknames" autocomplete="off"
+           hx-get="/people" hx-include="#people-filters" hx-trigger="input changed delay:250ms" hx-target="#people-results" hx-select="#people-results" hx-swap="outerHTML" hx-push-url="true">
   </div>
   <div class="filter-row">
     <div class="chips">
@@ -65,6 +67,7 @@
   {% endif %}
 </form>
 
+<div id="people-results">
 {% if browsing and upcoming %}
 <section class="section">
   <div class="section-head"><h2>Birthdays<span class="count">next 30 days</span></h2></div>
@@ -117,4 +120,5 @@
   <p class="empty">{% if q %}No one matches “{{ q }}”.{% else %}No people yet.{% endif %}</p>
   {% endif %}
 </section>
+</div>
 {% endblock %}

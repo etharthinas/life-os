@@ -31,3 +31,10 @@ def test_vcard_round_trip():
 def test_phone_formats():
     assert contacts.clean_phone("tel:01012345678") == "01012345678"
     assert contacts.clean_phone("[010 9999 0000](tel:01099990000)") == "010 9999 0000"
+
+
+def test_format_phone():
+    for raw in ("01012345678", "+82 10-1234-5678", "010.1234.5678", "tel:010 1234 5678", "[01012345678](tel:01012345678)", "1012345678"):
+        assert contacts.format_phone(raw) == "010-1234-5678"
+    assert contacts.format_phone("0111234567") == "011-123-4567"
+    assert contacts.format_phone("+1 415 555 0100") == "+1 415 555 0100"

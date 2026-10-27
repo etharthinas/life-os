@@ -51,11 +51,25 @@ def clean_phone(p) -> str:
 
 
 def phone_key(p: str) -> str:
-    """Digits only, Korean +82 numbers as 0…, so formats from different places compare equal."""
+    """Digits only, Korean +82 numbers (and mobiles that lost their 0: 1012345678) as 0…, so formats
+    from different places compare equal."""
     d = re.sub(r"\D", "", p)
     if d.startswith("82") and len(d) >= 11:
         d = "0" + d[2:]
+    elif re.fullmatch(r"1[016789]\d{7,8}", d):
+        d = "0" + d
     return d
+
+
+def format_phone(p) -> str:
+    """Korean mobile numbers as 010-1234-5678 (from +82 10…, 010.1234.5678, …); others as typed."""
+    p = clean_phone(p)
+    d = phone_key(p)
+    if re.fullmatch(r"01\d{9}", d):
+        return f"{d[:3]}-{d[3:7]}-{d[7:]}"
+    if re.fullmatch(r"01\d{8}", d):
+        return f"{d[:3]}-{d[3:6]}-{d[6:]}"
+    return p
 
 
 def parse(text: str) -> list[dict]:
@@ -110,7 +124,7 @@ def _merge_contact(old: dict, card: dict) -> dict:
             key = phone_key(v) if k == "phones" else v.lower()
             if key and key not in seen:
                 seen.add(key)
-                merged.append(v)
+                merged.append(format_phone(v) if k == "phones" else v)
         out[k] = merged
     for k in ("org", "uid"):
         if card.get(k) and not out.get(k):
@@ -166,6 +180,8 @@ def add_pending(uids: list[str]) -> int:
         for c in chosen:
             y, mo, d = c.get("birthday") or (None, None, None)
             contact = {k: c[k] for k in ("phones", "emails", "org", "uid") if c.get(k)}
+            if contact.get("phones"):
+                contact["phones"] = [format_phone(x) for x in contact["phones"]]
             conn.execute("insert into people (name, about, birth_year, birth_month, birth_day, contact) "
                          "values (%s, %s, %s, %s, %s, %s)",
                          (c["name"], c.get("org"), y, mo, d, json.dumps(contact, ensure_ascii=False)))

@@ -713,6 +713,8 @@ details.pop.org-filter[open] > .pop-body { left: 0; right: auto; }
 /* /journal: every day, one after another. */
 .jlist { display: flex; flex-direction: column; gap: 14px; }
 .jentry { gap: 10px; }
+.jhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.jhead form { margin: 0; }
 .jdate { display: flex; align-items: baseline; gap: 8px; font-family: var(--f-display); font-size: var(--t-lg); color: var(--ink); text-decoration: none; }
 .jdate .wd { font-size: var(--t-sm); color: var(--ink-3); }
 .jpeople { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; font-size: var(--t-xs); }

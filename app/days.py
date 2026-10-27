@@ -147,11 +147,11 @@ def dismiss(block_id: int) -> None:
 # --- Month view ---------------------------------------------------------------------------------
 
 def month_grid(year: int, month: int) -> list[date]:
-    """Monday-first weeks covering the month (5 or 6 rows)."""
+    """Sunday-first weeks covering the month (5 or 6 rows)."""
     first = date(year, month, 1)
-    start = first - timedelta(days=first.weekday())
+    start = first - timedelta(days=(first.weekday() + 1) % 7)
     nxt = date(year + month // 12, month % 12 + 1, 1)
-    end = nxt + timedelta(days=(7 - nxt.weekday()) % 7)
+    end = nxt + timedelta(days=(6 - nxt.weekday()) % 7)
     return [start + timedelta(days=i) for i in range((end - start).days)]
 
 

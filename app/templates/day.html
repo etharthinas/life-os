@@ -76,7 +76,8 @@
 
 <section class="section" id="journal">
   <div class="section-head"><h2>Daily log</h2>
-    <span class="row-gap"><a class="hint" href="/journal">All days →</a>{% if doc and doc.html %}<a class="btn btn-quiet" href="/day/{{ day.isoformat() }}/journal/edit" hx-get="/day/{{ day.isoformat() }}/journal/edit" hx-target="#daylog-main" hx-swap="outerHTML" hx-push-url="false">Edit</a>{% endif %}</span></div>
+    <span class="row-gap"><a class="hint" href="/journal">All days →</a>{% if doc and doc.html %}<a class="btn btn-quiet" href="/day/{{ day.isoformat() }}/journal/edit" hx-get="/day/{{ day.isoformat() }}/journal/edit" hx-target="#daylog-main" hx-swap="outerHTML" hx-push-url="false">Edit</a>{% endif %}
+      {% if doc and (doc.html or doc.extra_photos) %}<form method="post" action="/day/{{ day.isoformat() }}/journal/delete" onsubmit="return confirm('Delete the log for {{ day.month }}/{{ day.day }}? Its text and photos are removed; the people you picked stay.')"><button class="btn btn-quiet danger-link">Delete</button></form>{% endif %}</span></div>
   <article class="card daylog">
     <div id="daylog-main" class="daylog-main">
       {% if doc and doc.html %}

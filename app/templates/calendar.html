@@ -11,7 +11,7 @@
   </span>
 </header>
 <div class="month">
-  <div class="month-dow">{% for w in "월화수목금토일" %}<span class="{% if loop.last %}sun{% elif loop.index == 6 %}sat{% endif %}">{{ w }}</span>{% endfor %}</div>
+  <div class="month-dow">{% for w in "일월화수목금토" %}<span class="{% if loop.first %}sun{% elif loop.last %}sat{% endif %}">{{ w }}</span>{% endfor %}</div>
   {% for week in weeks %}
   <div class="month-week">
     {% for d in week %}{% set c = cells[d] %}

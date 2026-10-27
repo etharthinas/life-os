@@ -179,6 +179,19 @@ def save_day_journal(d: str, body: str = Form(""), photos: list[UploadFile] = Fi
     return RedirectResponse("/" if day == capture.today() else f"/day/{day}", status_code=303)
 
 
+@app.post("/day/{d}/journal/delete")
+def delete_day_journal(d: str, back: str = Form("")):
+    """Clear the day's log (text and photos). The people picked for the day stay."""
+    day = _parse_day(d)
+    with db.connect() as conn:
+        doc = journal.find(conn, day)
+    if doc:
+        journal.save(doc["id"], "")
+    if back.startswith("/"):
+        return RedirectResponse(back, status_code=303)
+    return RedirectResponse("/" if day == capture.today() else f"/day/{day}", status_code=303)
+
+
 @app.get("/entries/{raw_id}/edit", response_class=HTMLResponse)
 def edit_entry(request: Request, raw_id: int, back: str = ""):
     with db.connect() as conn:
@@ -678,7 +691,7 @@ def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), ali
         # Phone numbers and emails live with the contact card.
         contact = dict(old["contact"] or {})
         if phones is not None:
-            contact["phones"] = [contacts.clean_phone(x) for x in phones.split(",") if x.strip()]
+            contact["phones"] = [contacts.format_phone(x) for x in phones.split(",") if x.strip()]
         if emails is not None:
             contact["emails"] = [x.strip() for x in emails.split(",") if x.strip()]
         conn.execute("update people set contact = %s where id = %s", (Jsonb(contact), person_id))
