@@ -251,7 +251,7 @@ def hue(name: str) -> int:
 # Each person with their organizations; filtered by name, kind and organization.
 LIST_SQL = """
 select p.id, p.name, p.about, p.kind, p.aliases, p.birth_year, p.birth_month, p.birth_day, p.keep_in_touch_days, p.hide_birthday,
-       p.school, p.major, p.class_of,
+       p.school, p.majors, p.class_of,
        p.contact, ph.sha256 as photo, count(m.raw_id) as mentions,
        max(r.occurred_at) filter (where not m.named_only) as last_seen,
        coalesce((select json_agg(json_build_object('id', g.id, 'name', g.name) order by g.name)
@@ -288,7 +288,7 @@ def detail_options(conn) -> dict:
     if _options is None:
         rows = conn.execute(
             "select 'schools' as k, school as v, count(*) as n from people where school is not null group by 2 "
-            "union all select 'majors', major, count(*) from people where major is not null group by 2 "
+            "union all select 'majors', m, count(*) from people, unnest(majors) m group by 2 "
             "order by k, n desc, v").fetchall()
         _options = {"schools": [r["v"] for r in rows if r["k"] == "schools"],
                     "majors": [r["v"] for r in rows if r["k"] == "majors"]}
@@ -525,7 +525,7 @@ def gallery(person_id: int) -> list[dict]:
 
 
 def _who(p: dict) -> str:
-    return " · ".join(x for x in (p["school"], p["major"], f"{p['class_of']:02d}학번" if p["class_of"] is not None else None) if x)
+    return " · ".join(x for x in (p["school"], *(p["majors"] or []), f"{p['class_of']:02d}학번" if p["class_of"] is not None else None) if x)
 
 
 def _spans_for(entry: dict, ambiguous: dict[str, list[int]], cands: dict[int, dict]):
@@ -562,7 +562,7 @@ def render_entries(entries: list[dict]) -> None:
     with db.connect() as conn:
         with conn.pipeline():
             q_cands = conn.execute(
-                "select id, name, school, major, class_of from people where id = any(%s)", (cand_ids,))
+                "select id, name, school, majors, class_of from people where id = any(%s)", (cand_ids,))
             q_img = conn.execute(
                 "select rm.raw_id, m.name, m.sha256 from raw_media rm join media m on m.id = rm.media_id "
                 "where rm.raw_id = any(%s) order by rm.pos", ([e["id"] for e in entries],))

@@ -107,7 +107,7 @@
       {{ avatar(p) }}
       <span class="who">
         <span class="name">{{ p.name }}{% if p.kind == "group" %}<span class="badge">group</span>{% endif %}</span>
-        {% if p.kind == "person" and (p.school or p.major or p.class_of is not none) %}<span class="aka">{{ [p.school, p.major, ("%02d학번" | format(p.class_of)) if p.class_of is not none else None] | select | join(" · ") }}</span>{% elif p.about %}<span class="aka">{{ p.about }}</span>{% endif %}
+        {% if p.kind == "person" and (p.school or p.majors or p.class_of is not none) %}<span class="aka">{{ ([p.school] + (p.majors or []) + [("%02d학번" | format(p.class_of)) if p.class_of is not none else None]) | select | join(" · ") }}</span>{% elif p.about %}<span class="aka">{{ p.about }}</span>{% endif %}
         {% if p.orgs %}<span class="org-tags">{% for g in p.orgs[:3] %}<span class="org" style="--h: {{ hue(g.name) }}">{{ g.name }}</span>{% endfor %}{% if p.orgs | length > 3 %}<span class="more">+{{ p.orgs | length - 3 }}</span>{% endif %}</span>{% endif %}
         {% if p.kind == "group" and p.members %}<span class="aka">{{ p.members }} members</span>{% endif %}
       </span>

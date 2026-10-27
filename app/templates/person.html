@@ -1,4 +1,14 @@
 {% extends "base.html" %}
+{% macro chipfield(name, label, values, options, placeholder, multi) -%}
+<div class="cf-row"><span>{{ label }}</span>
+  <div class="chipfield" data-name="{{ name }}" data-placeholder="＋ {{ placeholder }}"{% if multi %} data-multi{% endif %}>
+    {% for v in values %}<span class="cf-chip">{{ v }}<input type="hidden" name="{{ name }}" value="{{ v }}"><button type="button" class="cf-x" aria-label="{{ v }} 빼기">✕</button></span>{% endfor %}
+    <input class="cf-input" autocomplete="off" placeholder="{{ ('＋ ' ~ placeholder) if multi or not values else '' }}" aria-label="{{ label }}">
+    <div class="cf-suggest" hidden></div>
+    <script type="application/json" class="cf-options">{{ options | tojson }}</script>
+  </div>
+</div>
+{%- endmacro %}
 {% from "_avatar.html" import avatar, ago, when, photo_picker, back %}
 {% block title %}{{ p.name }} · life-os{% endblock %}
 {% block content %}
@@ -63,15 +73,14 @@
         oninput="this.classList.add('dirty')" onchange="this.classList.add('dirty')">
     <label><span>이름</span><input name="name" value="{{ p.name }}" required></label>
     {% if person %}
-    {# School and major offer the names already used, so they're written the same way everywhere. #}
-    <label><span>학교</span><input name="school" list="schools" autocomplete="off" placeholder="—" value="{{ p.school or '' }}"></label>
-    <label><span>전공</span><input name="major" list="majors" autocomplete="off" placeholder="—" value="{{ p.major or '' }}"></label>
+    {# School (one) and majors (several) are chips, offering the names already used so they're written
+       the same way everywhere (static/chipfield.js). #}
+    <input type="hidden" name="details" value="1">
+    {{ chipfield("school", "학교", [p.school] if p.school else [], options.schools, "학교", multi=false) }}
+    {{ chipfield("majors", "전공", p.majors or [], options.majors, "전공 추가", multi=true) }}
     <label><span>학번</span>
-      <select name="class_of">
-        <option value="">—</option>
-        {% for y in range(26, 4, -1) %}<option value="{{ y }}" {% if p.class_of == y %}selected{% endif %}>{{ "%02d" | format(y) }}학번</option>{% endfor %}
-        {% if p.class_of is not none and (p.class_of > 26 or p.class_of < 5) %}<option value="{{ p.class_of }}" selected>{{ "%02d" | format(p.class_of) }}학번</option>{% endif %}
-      </select></label>
+      <span class="classof"><input name="class_of" class="num" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="—"
+        value="{{ '%02d' | format(p.class_of) if p.class_of is not none else '' }}"><em>학번</em></span></label>
     <label><span>생일</span><input name="birthday" class="num" placeholder="— (1998-03-07, or 03-07)"
       value="{% if p.birth_month %}{% if p.birth_year %}{{ p.birth_year }}-{% endif %}{{ '%02d' | format(p.birth_month) }}-{{ '%02d' | format(p.birth_day) }}{% endif %}"></label>
     <label><span>전화</span><input name="phones" type="tel" class="num" placeholder="—" value="{{ phones | join(', ') }}"></label>
@@ -86,8 +95,6 @@
         <option value="{{ d }}" {% if (p.keep_in_touch_days or 0) == d %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select></label>
-    <datalist id="schools">{% for x in options.schools %}<option value="{{ x }}">{% endfor %}</datalist>
-    <datalist id="majors">{% for x in options.majors %}<option value="{{ x }}">{% endfor %}</datalist>
     {% endif %}
     <div class="details-save">
       <button class="btn btn-quiet" type="reset" onclick="this.form.classList.remove('dirty')">Cancel</button>

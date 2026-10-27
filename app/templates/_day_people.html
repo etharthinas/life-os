@@ -56,6 +56,8 @@
     </div>
   </div>
   {% endfor %}
+  {# Shows while a chip is being dragged: drop it here and it's a meeting of its own. #}
+  <div class="new-meeting" data-meeting="{{ day_people | length }}"><ul class="chips-people"></ul><span class="hint">＋ 여기에 놓으면 새 미팅</span></div>
   {# Named in the text but not tagged as there: tap one to say they were (same as @ in the field).
      One list for the day; it sits under the meeting you're pointing at or typing in, and adds to
      that one (daypeople.js). #}

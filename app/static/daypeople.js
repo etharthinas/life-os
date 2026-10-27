@@ -25,11 +25,12 @@
           post(box, "/meetings/order", { order: order.join(",") });
         } });
     }
-    box.querySelectorAll(".meeting > .chips-people").forEach((ul) => Sortable.create(ul, {
+    box.querySelectorAll(".meeting > .chips-people, .new-meeting > .chips-people").forEach((ul) => Sortable.create(ul, {
       ...opts, group: "day-people", sort: false, draggable: "li[data-ids]",
       filter: ".unpick", preventOnFilter: false,
-      onStart: () => { closeMenu(); clearTimeout(pressTimer); },
-      onAdd: (e) => post(box, "/move", { ids: e.item.dataset.ids, meeting: e.to.closest(".meeting").dataset.meeting }),
+      onStart: () => { closeMenu(); clearTimeout(pressTimer); box.classList.add("chip-dragging"); },
+      onEnd: () => box.classList.remove("chip-dragging"),
+      onAdd: (e) => post(box, "/move", { ids: e.item.dataset.ids, meeting: e.to.closest("[data-meeting]").dataset.meeting }),
     }));
   }
   // "Mentioned" (people the text only names) goes under the meeting you're at: the one the mouse
@@ -80,6 +81,7 @@
     menu.innerHTML = `<span class="q">${esc(name)}</span>`
       + (gid ? `<button type="button" data-act="ungroup"><b>전체 해제</b><span class="sub">그룹 라벨만 떼고, 사람들은 그대로 (다른 그룹으로 다시 묶지 않음)</span></button>` : "")
       + others.map((m) => `<button type="button" data-act="move" data-to="${m.dataset.meeting}">→ ${esc(m.dataset.title)}(으)로 옮기기</button>`).join("")
+      + `<button type="button" data-act="move" data-to="${box.querySelector(".new-meeting").dataset.meeting}">→ 새 미팅으로 옮기기</button>`
       + `<a href="/people/${gid || chip.dataset.pid}">${gid ? "그룹 페이지" : "프로필"} 열기</a>`;
     document.body.append(menu);
     menu.style.left = Math.max(8, Math.min(x, innerWidth - menu.offsetWidth - 8)) + "px";

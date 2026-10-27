@@ -737,8 +737,8 @@ def birthday_reminders(person_id: int, hide: int = Form(1), back: str = Form("")
 @app.post("/people/{person_id}")
 def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), aliases: str = Form(""),
                 birthday: str = Form(""), keep_in_touch_days: str = Form(""), phones: str | None = Form(None),
-                emails: str | None = Form(None), school: str | None = Form(None), major: str | None = Form(None),
-                class_of: str | None = Form(None)):
+                emails: str | None = Form(None), school: str | None = Form(None), majors: list[str] = Form([]),
+                class_of: str | None = Form(None), details: str | None = Form(None)):
     y, mo, d = parse_birthday(birthday)
     if birthday.strip() and mo is None:
         raise HTTPException(400, "birthday: use YYYY-MM-DD or MM-DD")
@@ -756,12 +756,14 @@ def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), ali
                       int(keep_in_touch_days) if keep_in_touch_days.isdigit() and int(keep_in_touch_days) else None,
                       person_id))
         # The standard details, written the way they already are elsewhere ("고려대학교" → 고려대).
-        if school is not None or major is not None or class_of is not None:
+        # (`details` marks the person form: with every major taken off, no `majors` come at all.)
+        if details is not None:
             known = people.detail_options(conn)
             yy = int(class_of) % 100 if (class_of or "").strip().isdigit() else None
-            conn.execute("update people set school = %s, major = %s, class_of = %s where id = %s",
+            majors_std = [m for m in (people.standard_detail(x, known["majors"]) for x in majors) if m]
+            conn.execute("update people set school = %s, majors = %s, class_of = %s where id = %s",
                          (people.standard_detail(school or "", known["schools"], people.SCHOOL_NAMES),
-                          people.standard_detail(major or "", known["majors"]), yy, person_id))
+                          list(dict.fromkeys(majors_std)), yy, person_id))
         # Phone numbers and emails live with the contact card.
         contact = dict(old["contact"] or {})
         if phones is not None:

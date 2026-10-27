@@ -642,8 +642,12 @@ def ungroup(d: date, group_id: int, member_ids: list[int]) -> None:
 
 def move_to_meeting(d: date, ids: list[int], meeting: int) -> None:
     """Drag a chip to another meeting: these people (or a group, with the people under it) go there.
-    A group labelled automatically that you moved stays where you put it."""
+    A group labelled automatically that you moved stays where you put it. Dropped past the last
+    meeting, it starts a new one."""
     meetings = day_people(d)
+    if meeting == len(meetings) and ids:
+        add_meeting(d)
+        meetings = day_people(d)
     if not (0 <= meeting < len(meetings)) or not ids:
         return
     with db.connect() as conn, conn.transaction():

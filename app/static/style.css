@@ -843,3 +843,34 @@ form:has(input[name=kind][value=group]:checked) .if-person { display: none; }
 .meeting.selecting .group-members li { border-radius: 999px; background: var(--sunken); padding-right: 4px; }
 .meeting.selecting .group-members li a { padding: 2px 6px 2px 2px; }
 .meeting.selecting .group-members .unpick { display: none; }
+
+/* Drop a chip past the last meeting: a new meeting (daypeople.js). */
+.new-meeting { display: none; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 10px; border: 1.5px dashed var(--accent);
+  border-radius: var(--r-md); background: var(--accent-soft); }
+.chip-dragging .new-meeting { display: flex; }
+.new-meeting .chips-people { min-height: 30px; flex: 1; }
+.new-meeting .hint { color: var(--accent); font-size: var(--t-sm); white-space: nowrap; }
+
+/* Person details: 학교 and 전공 as chips, 학번 typed (chipfield.js). Rows line up with the others. */
+.details-form .cf-row { display: contents; }
+.details-form .cf-row > span { padding: 11px 16px 11px 0; color: var(--ink-2); font-size: var(--t-sm); border-top: 1px solid var(--rule); }
+.chipfield { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 0; border-top: 1px solid var(--rule); min-width: 0; cursor: text; }
+.cf-chip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 10px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font-size: var(--t-sm); font-weight: 600; line-height: 1.3; }
+.cf-x { border: 0; background: none; padding: 2px 5px; border-radius: 999px; color: inherit; opacity: .55; font-size: 11px; cursor: pointer; }
+.cf-x:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chipfield .cf-input { flex: 1; min-width: 7em; border: 0; padding: 4px 0; background: none; font: inherit; font-size: var(--t-sm); box-shadow: none !important; }
+.chipfield .cf-input:focus { outline: none; }
+.chipfield:focus-within { box-shadow: inset 0 -2px 0 var(--accent); }
+.cf-suggest { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-width: 360px; display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 10px; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow); }
+.cf-suggest[hidden] { display: none; }
+.cf-suggest button { border: 1px solid var(--rule); background: var(--paper); color: var(--ink); border-radius: 999px; padding: 5px 11px;
+  font: inherit; font-size: var(--t-sm); cursor: pointer; }
+.cf-suggest button:hover { border-color: var(--accent); color: var(--accent); }
+.cf-suggest .cf-new { border-style: dashed; color: var(--accent); }
+.details-form .classof { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--rule); }
+.details-form .classof input { width: 3.5em; border: 0; padding: 11px 0; background: none; font: inherit; }
+.details-form .classof input:focus { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.details-form .classof em { font-style: normal; color: var(--ink-3); font-size: var(--t-sm); }
+.details-form label > .classof { padding: 0 0 0 0; color: var(--ink); font-size: inherit; }
