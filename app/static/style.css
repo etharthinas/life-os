@@ -155,6 +155,7 @@ button:hover, .btn:hover { border-color: var(--ink-3); text-decoration: none; }
 .week [aria-current="date"] .d { color: var(--paper); }
 .week [aria-current="date"].has .dot { background: var(--paper); }
 .week .sun { color: var(--danger); }
+.week .sat { color: var(--accent); }
 
 .allday { display: flex; flex-wrap: wrap; gap: 6px; }
 .allday span { font-size: var(--t-sm); background: color-mix(in srgb, var(--c) 16%, var(--surface)); border-radius: 999px; padding: 4px 10px; }
@@ -261,6 +262,12 @@ span.avatar { color: hsl(var(--h) 42% 32%); background: hsl(var(--h) 55% 90%); }
 
 .shelf { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding: 2px max(16px, env(safe-area-inset-left, 0px)) 6px; scroll-snap-type: x proximity; scroll-padding-inline: max(16px, env(safe-area-inset-left, 0px)); }
 .shelf > li { flex: none; scroll-snap-align: start; }
+.bday-item { position: relative; }
+.bday-item form { position: absolute; top: 4px; right: 4px; margin: 0; }
+.hide-bday { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink-3); font-size: 12px; cursor: pointer; }
+.hide-bday:hover { background: var(--sunken); color: var(--ink); }
+.stats .bday form { margin: 0; }
+.stats .bday.muted b { color: var(--ink-3); }
 .bday-card {
   width: 112px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
   padding: 14px 8px 12px; color: var(--ink); text-decoration: none;
@@ -792,3 +799,21 @@ details.pop.org-filter[open] > .pop-body { left: 0; right: auto; }
 .who-pick button.undo + button.undo { border-top: none; }
 .who-is.linked > a { text-decoration: none; }
 form:has(input[name=kind][value=group]:checked) .if-person { display: none; }
+
+/* Tap feedback (base.html): a bar while loading, a spinning button, a toast once it's done. */
+#busy-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; pointer-events: none; opacity: 0; transition: opacity .2s;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; }
+#busy-bar.on { opacity: 1; animation: busy-slide 1s linear infinite; }
+@keyframes busy-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.is-busy { position: relative; color: transparent !important; pointer-events: none; }
+.is-busy::after { content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--ink-3); border-top-color: transparent; animation: spin .7s linear infinite; }
+.btn-primary.is-busy::after { border-color: var(--on-accent); border-top-color: transparent; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 1000;
+  max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 999px; background: var(--ink); color: var(--paper);
+  font-size: var(--t-sm); font-weight: 600; box-shadow: var(--shadow); animation: toast-in .18s ease-out; transition: opacity .3s, transform .3s; }
+#toast.bad { background: var(--danger); color: #fff; border-radius: 14px; }
+#toast.out { opacity: 0; transform: translateX(-50%) translateY(8px); }
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { #busy-bar.on, .is-busy::after { animation-duration: 3s; } #toast { animation: none; } }

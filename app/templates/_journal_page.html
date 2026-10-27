@@ -4,7 +4,7 @@
 <article class="card daylog jentry">
   <div class="jhead"><a class="jdate" href="/day/{{ d }}"><span>{{ e.occurred_at | local("%Y.%m.%d") }}</span>
     <span class="wd">{{ "일월화수목금토"[e.occurred_at | local("%w") | int] }}</span></a>
-    <form method="post" action="/day/{{ d }}/journal/delete" onsubmit="return confirm('Delete the log for {{ e.occurred_at | local('%m/%d') }}? Its text and photos are removed; the people you picked stay.')"><input type="hidden" name="back" value="/journal"><button class="btn btn-quiet danger-link">Delete</button></form></div>
+    <form method="post" action="/day/{{ d }}/journal/delete" hx-confirm="Delete the log for {{ e.occurred_at | local('%m/%d') }}? Its text and photos are removed; the people you picked stay."><input type="hidden" name="back" value="/journal"><button class="btn btn-quiet danger-link">Delete</button></form></div>
   {% if e.html %}<div class="prose" data-raw="{{ e.id }}">{{ e.html }}</div>{% endif %}
   {% set n = e %}{% include "_extra_photos.html" %}
   {% if e.people %}<p class="jpeople">{% for p in e.people %}<a href="/people/{{ p.id }}"{% if p.kind == "group" %} class="grp"{% endif %}>{{ p.name }}</a>{% endfor %}</p>{% endif %}

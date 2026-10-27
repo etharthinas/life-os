@@ -70,8 +70,8 @@ def load_day(d: date) -> dict:
                 "where occurred_at >= %s and occurred_at < %s order by occurred_at", (lo, hi))
             q_day_todos = conn.execute(DAY_TODOS_SQL, _day_todos_args(d))
             q_people = conn.execute(journal.DAY_PEOPLE_SQL, (lo, hi))
-            # Entry counts for the week strip (Mon–Sun around the day).
-            w_lo = _bounds(d - timedelta(days=d.weekday()))[0]
+            # Entry counts for the week strip (Sun–Sat around the day).
+            w_lo = _bounds(d - timedelta(days=(d.weekday() + 1) % 7))[0]
             q_week = conn.execute(
                 "select (occurred_at at time zone %s)::date as day, count(*) as n from raw_entries "
                 "where occurred_at >= %s and occurred_at < %s group by 1",
@@ -175,7 +175,7 @@ def load_month(year: int, month: int) -> dict:
                 "where occurred_at >= %s and occurred_at < %s group by 1", (str(config.TZ), lo, hi))
             q_bdays = conn.execute(
                 "select id, name, birth_month, birth_day, birth_year from people "
-                "where kind = 'person' and birth_month is not null and birth_day is not null")
+                "where kind = 'person' and birth_month is not null and birth_day is not null and not hide_birthday")
         events, todos, logs, bdays = q_events.fetchall(), q_todos.fetchall(), q_logs.fetchall(), q_bdays.fetchall()
     cells = {d: {"events": [], "todos": [], "birthdays": [], "logs": 0} for d in days_}
     for e in events:

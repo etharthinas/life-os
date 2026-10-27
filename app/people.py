@@ -241,7 +241,7 @@ def hue(name: str) -> int:
 
 # Each person with their organizations; filtered by name, kind and organization.
 LIST_SQL = """
-select p.id, p.name, p.about, p.kind, p.aliases, p.birth_year, p.birth_month, p.birth_day, p.keep_in_touch_days,
+select p.id, p.name, p.about, p.kind, p.aliases, p.birth_year, p.birth_month, p.birth_day, p.keep_in_touch_days, p.hide_birthday,
        p.school, p.major, p.class_of,
        p.contact, ph.sha256 as photo, count(m.raw_id) as mentions,
        max(r.occurred_at) filter (where not m.named_only) as last_seen,
@@ -359,7 +359,7 @@ def list_people(q: str = "", kind: str = "", org: int | None = None, show: str =
     rows = [p for p in rows if SHOWS.get(show, SHOWS[""])(p)]
     if SORTS.get(sort):
         rows.sort(key=SORTS[sort])
-    upcoming = sorted((p for p in rows if p["birthday_in"] is not None and p["birthday_in"] <= 30),
+    upcoming = sorted((p for p in rows if p["birthday_in"] is not None and p["birthday_in"] <= 30 and not p["hide_birthday"]),
                       key=lambda p: p["birthday_in"])
     overdue = sorted((p for p in rows if p["overdue"]),
                      key=lambda p: -(p["days_since"] or 10**6) / p["keep_in_touch_days"])

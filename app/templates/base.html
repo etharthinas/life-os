@@ -163,6 +163,55 @@
         if (want && have && want !== have) location.reload();
       });
     }
+    // Did that tap work? While a request is out, a bar runs along the top and the button you pressed
+    // spins (and can't be pressed twice); a change that went through says so ("✓ Deleted"), and one
+    // that didn't says that instead. Preloads and background refreshes stay quiet.
+    if (!window.feedbackReady) {
+      window.feedbackReady = true;
+      let out = 0, barTimer = null;
+      const pending = new WeakMap();  // request → { btn, text }
+      const live = new WeakSet();     // requests out now (afterRequest can fire twice for one)
+      const bar = () => document.getElementById("busy-bar") || document.body.appendChild(Object.assign(document.createElement("div"), { id: "busy-bar" }));
+      const quiet = (d) => d.requestConfig?.headers?.["HX-Preloaded"] === "true" || d.requestConfig?.headers?.["X-Fresh"] === "1";
+      const done = { Delete: "Deleted", Save: "Saved", Add: "Added", Remove: "Removed", Hide: "Hidden" };
+      const toast = (text, bad) => {
+        document.getElementById("toast")?.remove();
+        const t = Object.assign(document.createElement("div"), { id: "toast", className: bad ? "bad" : "", textContent: text });
+        t.setAttribute("role", "status");
+        document.body.appendChild(t);
+        setTimeout(() => t.classList.add("out"), bad ? 4000 : 1800);
+        setTimeout(() => t.remove(), bad ? 4400 : 2200);
+      };
+      document.addEventListener("htmx:beforeRequest", (e) => {
+        const d = e.detail;
+        if (quiet(d) || live.has(d.xhr)) return;
+        live.add(d.xhr);
+        out++;
+        // Pages usually come from the saved copy at once: only show the bar if it takes a moment.
+        clearTimeout(barTimer);
+        barTimer = setTimeout(() => out && bar().classList.add("on"), d.requestConfig.verb === "get" ? 150 : 0);
+        const btn = d.requestConfig.triggeringEvent?.submitter || (d.elt.matches("button, .btn") ? d.elt : null);
+        if (d.requestConfig.verb === "get") return;
+        if (btn) { btn.classList.add("is-busy"); btn.disabled = true; }
+        pending.set(d.xhr, { btn, text: btn?.dataset.done || done[btn?.textContent.trim().split(/\s/)[0]] || (btn ? "Done" : "Saved") });
+      });
+      document.addEventListener("htmx:afterRequest", (e) => {
+        const d = e.detail;
+        if (!live.has(d.xhr)) return;
+        live.delete(d.xhr);
+        out = Math.max(0, out - 1);
+        if (!out) { clearTimeout(barTimer); document.getElementById("busy-bar")?.classList.remove("on"); }
+        const job = pending.get(d.xhr);
+        if (job?.btn) { job.btn.classList.remove("is-busy"); job.btn.disabled = false; }
+        if (d.requestConfig.verb === "get") {
+          if (d.failed && !d.xhr?.status) toast("Couldn't load — check your connection", true);
+          return;
+        }
+        // After the page has been swapped in, so the message lands on the new page.
+        requestAnimationFrame(() => d.successful ? toast(`✓ ${job?.text || "Saved"}`)
+          : toast(d.xhr?.status ? `Didn't work (${d.xhr.status}) — try again` : "Didn't go through — check your connection and try again", true));
+      });
+    }
     // People picker: Enter picks the first match; Esc or a click elsewhere closes the list.
     // (Boosted page loads re-run this script, so the listeners are added once.)
     if (!window.pickerReady) {

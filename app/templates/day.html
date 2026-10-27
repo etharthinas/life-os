@@ -19,7 +19,7 @@
   <nav class="week" aria-label="This week">
     {% for d, n in week %}
     <a href="{{ '/' if d == today else '/day/' ~ d.isoformat() }}" class="{% if n %}has{% endif %}{% if d == today %} is-today{% endif %}" {% if d == day %}aria-current="date"{% endif %}>
-      <span class="{% if d.weekday() == 6 %}sun{% endif %}">{{ "월화수목금토일"[d.weekday()] }}</span>
+      <span class="{% if d.weekday() == 6 %}sun{% elif d.weekday() == 5 %}sat{% endif %}">{{ "월화수목금토일"[d.weekday()] }}</span>
       <span class="d">{{ d.day }}</span><span class="dot"></span>
     </a>
     {% endfor %}
@@ -77,7 +77,7 @@
 <section class="section" id="journal">
   <div class="section-head"><h2>Daily log</h2>
     <span class="row-gap"><a class="hint" href="/journal">All days →</a>{% if doc and doc.html %}<a class="btn btn-quiet" href="/day/{{ day.isoformat() }}/journal/edit" hx-get="/day/{{ day.isoformat() }}/journal/edit" hx-target="#daylog-main" hx-swap="outerHTML" hx-push-url="false">Edit</a>{% endif %}
-      {% if doc and (doc.html or doc.extra_photos) %}<form method="post" action="/day/{{ day.isoformat() }}/journal/delete" onsubmit="return confirm('Delete the log for {{ day.month }}/{{ day.day }}? Its text and photos are removed; the people you picked stay.')"><button class="btn btn-quiet danger-link">Delete</button></form>{% endif %}</span></div>
+      {% if doc %}<form method="post" action="/day/{{ day.isoformat() }}/journal/delete" hx-confirm="Delete the log for {{ day.month }}/{{ day.day }}? Its text and photos are removed; the people you picked stay."><button class="btn btn-quiet danger-link">Delete</button></form>{% endif %}</span></div>
   <article class="card daylog">
     <div id="daylog-main" class="daylog-main">
       {% if doc and doc.html %}

@@ -183,10 +183,7 @@ def save_day_journal(d: str, body: str = Form(""), photos: list[UploadFile] = Fi
 def delete_day_journal(d: str, back: str = Form("")):
     """Clear the day's log (text and photos). The people picked for the day stay."""
     day = _parse_day(d)
-    with db.connect() as conn:
-        doc = journal.find(conn, day)
-    if doc:
-        journal.save(doc["id"], "")
+    journal.clear_day(day)
     if back.startswith("/"):
         return RedirectResponse(back, status_code=303)
     return RedirectResponse("/" if day == capture.today() else f"/day/{day}", status_code=303)
@@ -234,8 +231,8 @@ def day_view(request: Request, d: str | None = None):
     timed = [{"type": "event", "start": e["start_at"], **e} for e in data["events"] if not e["all_day"]]
     timed += [{"type": "block", "start": b["start_at"], **b} for b in data["blocks"]]
     timed.sort(key=lambda x: x["start"])
-    monday = day - timedelta(days=day.weekday())
-    week = [(monday + timedelta(days=i), data["week"].get(monday + timedelta(days=i), 0)) for i in range(7)]
+    sunday = day - timedelta(days=(day.weekday() + 1) % 7)
+    week = [(sunday + timedelta(days=i), data["week"].get(sunday + timedelta(days=i), 0)) for i in range(7)]
     return _render(request, "day.html", day=day, prev=day - timedelta(days=1), next=day + timedelta(days=1),
                    all_day=[e for e in data["events"] if e["all_day"]], timed=timed, week=week,
                    blocks=data["blocks"], day_todos=data["day_todos"], day_people=data["meetings"],
@@ -658,6 +655,13 @@ def person_org_add(request: Request, person_id: int, group_id: int | None = Form
 def person_org_remove(request: Request, person_id: int, group_id: int):
     people.leave_org(person_id, group_id)
     return _render(request, "_orgs.html", pid=person_id, orgs=people.person_orgs(person_id))
+
+
+@app.post("/people/{person_id}/birthday-reminders")
+def birthday_reminders(person_id: int, hide: int = Form(1), back: str = Form("")):
+    with db.connect() as conn:
+        conn.execute("update people set hide_birthday = %s where id = %s", (bool(hide), person_id))
+    return RedirectResponse(back if back.startswith("/") else f"/people/{person_id}", status_code=303)
 
 
 @app.post("/people/{person_id}")

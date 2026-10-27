@@ -124,7 +124,9 @@
   {% if p.kind == "person" %}<li class="{% if p.overdue %}late{% endif %}"><b>{{ ago(p.days_since) }}</b><span>last seen</span></li>{% endif %}
   <li><b>{{ p.mentions }}</b><span>entries</span></li>
   {% if p.kind == "group" %}<li><b>{{ members | length }}</b><span>members</span></li>{% endif %}
-  {% if p.birthday %}<li class="bday"><b>{{ when(p.birthday_in) }}</b><span>{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></li>{% endif %}
+  {% if p.birthday %}<li class="bday{% if p.hide_birthday %} muted{% endif %}"><b>{{ when(p.birthday_in) }}</b><span>{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span>
+    <form method="post" action="/people/{{ p.id }}/birthday-reminders"><input type="hidden" name="hide" value="{{ 0 if p.hide_birthday else 1 }}">
+      <button class="btn-quiet">{{ "Remind me again" if p.hide_birthday else "Hide from reminders" }}</button></form></li>{% endif %}
   {% if p.keep_in_touch_days %}<li><b>{{ p.keep_in_touch_days }}d</b><span>catch-up goal</span></li>{% endif %}
 </ul>
 {% if saved %}<p class="notice">Saved.</p>{% endif %}

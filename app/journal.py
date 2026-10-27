@@ -129,6 +129,19 @@ def save(raw_id: int, text: str, media_ids=()) -> None:
         sync(conn, raw_id, body)
 
 
+def clear_day(d: date) -> None:
+    """Delete the day's log: its text and photos go. The entry itself goes too unless people are still
+    on the day (picked by hand); a blank header alone shouldn't make the day look written in."""
+    with db.connect() as conn:
+        doc = find(conn, d)
+    if not doc:
+        return
+    save(doc["id"], "")
+    with db.connect() as conn:
+        conn.execute("delete from raw_entries r where id = %s and not exists "
+                     "(select 1 from mentions where raw_id = r.id)", (doc["id"],))
+
+
 def save_day(d: date, text: str, source: str, media_ids=()) -> int:
     """Write the day's journal: overwrite it if it exists, else create it."""
     with db.connect() as conn:

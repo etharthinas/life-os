@@ -73,10 +73,12 @@
   <div class="section-head"><h2>Birthdays<span class="count">next 30 days</span></h2></div>
   <ul class="shelf">
   {% for p in upcoming %}
-    <li><a class="card bday-card" href="/people/{{ p.id }}">{{ avatar(p, "lg") }}
+    <li class="bday-item"><a class="card bday-card" href="/people/{{ p.id }}">{{ avatar(p, "lg") }}
       <span class="name">{{ p.name }}</span>
       <span class="when{% if p.birthday_in <= 1 %} soon{% endif %}">{{ when(p.birthday_in) }}</span>
-      <span class="sub">{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></a></li>
+      <span class="sub">{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></a>
+      <form method="post" action="/people/{{ p.id }}/birthday-reminders"><input type="hidden" name="hide" value="1"><input type="hidden" name="back" value="/people">
+        <button class="hide-bday" aria-label="Hide {{ p.name }} from birthday reminders" title="Hide from birthday reminders">✕</button></form></li>
   {% endfor %}
   </ul>
 </section>
@@ -110,7 +112,7 @@
         {% if p.kind == "group" and p.members %}<span class="aka">{{ p.members }} members</span>{% endif %}
       </span>
       <span class="side">
-        {% if p.birthday_in is not none and p.birthday_in <= 7 %}<span class="bday">birthday {{ when(p.birthday_in) }}</span>{% endif %}
+        {% if p.birthday_in is not none and p.birthday_in <= 7 and not p.hide_birthday %}<span class="bday">birthday {{ when(p.birthday_in) }}</span>{% endif %}
         {% if p.last_seen %}<span class="{% if p.overdue %}late{% endif %}">{{ ago(p.days_since) }}</span><span>{{ p.mentions }} entries</span>{% else %}<span>no entries</span>{% endif %}
       </span>
     </a></li>
