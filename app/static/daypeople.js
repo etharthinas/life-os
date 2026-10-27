@@ -1,7 +1,7 @@
 // A day's meetings (_day_people.html): drag a meeting by ⠿ to put them in order, drag a chip (a
 // person, or a group with the people under it) into another meeting; long press or right-click a
 // chip for a menu: 전체 해제 for a group (its label off, the people stay, not regrouped), move to
-// another meeting, open their page.
+// another meeting, open their page. "Mentioned" follows the meeting you're at.
 (() => {
   if (window.dayPeopleReady) return;
   window.dayPeopleReady = true;
@@ -32,7 +32,37 @@
       onAdd: (e) => post(box, "/move", { ids: e.item.dataset.ids, meeting: e.to.closest(".meeting").dataset.meeting }),
     }));
   }
-  const setupAll = () => document.querySelectorAll("#day-people").forEach(setup);
+  // "Mentioned" (people the text only names) goes under the meeting you're at: the one the mouse
+  // rests on, or you're typing in or touched. Its ＋ adds to that meeting.
+  let active = 0, dwell = 0;
+  function place(box) {
+    const list = box.querySelector(":scope > .mentioned, .meeting > .mentioned");
+    const mt = box.querySelector(`.meeting[data-meeting="${active}"]`) || box.querySelector(".meeting");
+    if (list && mt && list.parentElement !== mt) mt.append(list);
+  }
+  const go = (mt) => {
+    if (!mt || +mt.dataset.meeting === active) return;
+    active = +mt.dataset.meeting;
+    place(mt.closest("#day-people"));
+  };
+  const meetingAt = (t) => t.closest?.("#day-people.many .meeting");
+  document.addEventListener("mousemove", (e) => {
+    const mt = meetingAt(e.target);
+    clearTimeout(dwell);
+    if (mt) dwell = setTimeout(() => go(mt), 200);  // resting, not passing over (moving it shifts the layout)
+  }, { passive: true });
+  document.addEventListener("focusin", (e) => go(meetingAt(e.target)));
+  document.addEventListener("touchstart", (e) => go(meetingAt(e.target)), { passive: true });
+  document.addEventListener("htmx:configRequest", (e) => {
+    const mt = e.detail.elt.closest?.(".mentioned")?.closest(".meeting");
+    if (mt) e.detail.path = e.detail.path.replace(/meeting=\d+/, `meeting=${mt.dataset.meeting}`);
+  });
+
+  let day = null;
+  const setupAll = () => document.querySelectorAll("#day-people").forEach((box) => {
+    if (dayOf(box) !== day) { day = dayOf(box); active = 0; }  // another day: start at its first meeting
+    place(box); setup(box);
+  });
   addEventListener("load", setupAll);
   document.addEventListener("htmx:afterSettle", setupAll);
   if (document.readyState !== "loading") setupAll();

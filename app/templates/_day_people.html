@@ -54,15 +54,18 @@
       <span class="label-hint hint">Tap the people to group</span>
       <div class="label-opts"></div>
     </div>
-    {% if mt.mentioned %}
-    {# Named in the text but not tagged as there: tap one to say they were (same as @ in the field). #}
-    <p class="mentioned">
-      <span>Mentioned</span>{% for x in mt.mentioned %}<button type="button" title="They were there: add to {{ 'this meeting' if many else 'the day' }}"
-        hx-post="/day/{{ day.isoformat() }}/people?meeting={{ mt.n }}" hx-vals='{"person_id": {{ x.id }}}'
-        hx-target="#day-people" hx-swap="outerHTML">＋ {{ x.name }}</button>{% endfor %}</p>
-    {% endif %}
   </div>
   {% endfor %}
+  {# Named in the text but not tagged as there: tap one to say they were (same as @ in the field).
+     One list for the day; it sits under the meeting you're pointing at or typing in, and adds to
+     that one (daypeople.js). #}
+  {% set mentioned = day_people | map(attribute="mentioned") | sum(start=[]) %}
+  {% if mentioned %}
+  <p class="mentioned">
+    <span>Mentioned</span>{% for x in mentioned %}<button type="button" title="They were there: add to {{ 'this meeting' if many else 'the day' }}"
+      hx-post="/day/{{ day.isoformat() }}/people?meeting=0" hx-vals='{"person_id": {{ x.id }}}'
+      hx-target="#day-people" hx-swap="outerHTML">＋ {{ x.name }}</button>{% endfor %}</p>
+  {% endif %}
   <div class="day-people-acts">
     <button class="btn-quiet add-meeting" hx-post="/day/{{ day.isoformat() }}/meetings" hx-target="#day-people" hx-swap="outerHTML">＋ Another meeting</button>
     {# Who's in the day's photos, now (shown only when the log has photos: see style.css). #}
