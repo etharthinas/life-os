@@ -56,9 +56,11 @@ def test_render_markdown():
 
 def test_at_mentions_and_groups_in_text(monkeypatch):
     from app import people
-    monkeypatch.setattr(people, "_directory", (1e18, {"김민수": 1, "Aaron Liu": 2, "김민": 3, "GH-19": 9, "GH": 8}))
-    monkeypatch.setattr(people, "_groups", (1e18, {"GH-19": 9, "GH": 8}))
+    monkeypatch.setattr(people, "_names", {"at": 1e18, "loading": False, "data": {
+        "directory": {"김민수": 1, "Aaron Liu": 2, "김민": 3, "GH-19": 9, "GH": 8}, "groups": {"GH-19": 9, "GH": 8},
+        "full": {"김민수": 1, "Aaron Liu": 2, "김민": 3}, "given": {}, "ambiguous": {}, "not_names": set()}})
     monkeypatch.setattr(people, "_mention_re", (0, None))
+    monkeypatch.setattr(people, "_names_re", (0, None, None, None))
     assert people.spans_in_text("@김민수랑 밥") == [(0, 4, 1)]
     assert people.spans_in_text("@Aaron Liu와") == [(0, 10, 2)]
     assert people.spans_in_text("mail me@김민수") == []

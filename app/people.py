@@ -2,6 +2,7 @@
 
 import collections
 import re
+import threading
 import time
 from datetime import date, datetime
 
@@ -9,45 +10,78 @@ from . import config, db, media
 from .notetext import nfc
 
 # --- Name directory -----------------------------------------------------------------------------
-# name/alias → person id, cached in-process so resolving [[links]] costs no DB round trip.
+# Everyone's names, cached in-process so resolving [[links]] and names in text costs no DB round
+# trip. All of it comes in one round trip; once it's 5 minutes old the old copy is still used while
+# a fresh one loads in the background. A change made here (forget_directory) reloads at once.
 
-_directory: tuple[float, dict[str, int]] = (0.0, {})
+_names: dict = {"at": 0.0, "data": None, "loading": False}
+_names_lock = threading.Lock()
+
+
+def _load_names() -> dict:
+    with db.connect() as conn:
+        with conn.pipeline():
+            q_people = conn.execute("select id, name, kind, aliases from people order by id")
+            q_not = conn.execute("select value from settings where key = 'not_names'")
+        rows, not_row = q_people.fetchall(), q_not.fetchone()
+    directory, groups, full, every, given = {}, {}, {}, set(), collections.defaultdict(set)
+    for r in rows:
+        ns = [r["name"], *r["aliases"]]
+        every.update(ns)
+        for n in ns:
+            directory.setdefault(n, r["id"])
+        if r["kind"] == "group":
+            for n in ns:
+                if len(n) >= 2:
+                    groups.setdefault(n, r["id"])
+        if r["kind"] != "person":
+            continue
+        for n in ns:
+            if len(n) >= 2:
+                full.setdefault(n, r["id"])
+        if len(r["name"]) == 3 and all("가" <= c <= "힣" for c in r["name"]):
+            given[r["name"][1:]].add(r["id"])
+    usable = {g: ids for g, ids in given.items() if g not in every and g not in COMMON_WORDS}
+    data = {"directory": directory, "groups": groups, "full": full,
+            "given": {g: next(iter(ids)) for g, ids in usable.items() if len(ids) == 1},
+            "ambiguous": {g: sorted(ids) for g, ids in usable.items() if len(ids) > 1},
+            "not_names": set(not_row["value"]) if not_row else set()}
+    _names.update(at=time.monotonic(), data=data)
+    return data
+
+
+def _refresh_names() -> None:
+    try:
+        _load_names()
+    finally:
+        _names["loading"] = False
+
+
+def _names_data() -> dict:
+    data = _names["data"]
+    if data is None:
+        with _names_lock:
+            return _names["data"] or _load_names()
+    if time.monotonic() - _names["at"] > 300 and not _names["loading"]:
+        _names["loading"] = True
+        threading.Thread(target=_refresh_names, daemon=True).start()
+    return data
 
 
 def directory() -> dict[str, int]:
-    global _directory
-    if time.monotonic() - _directory[0] > 300:
-        names = {}
-        with db.connect() as conn:
-            for r in conn.execute("select id, name, aliases from people order by id"):
-                for n in [r["name"], *r["aliases"]]:
-                    names.setdefault(n, r["id"])
-        _directory = (time.monotonic(), names)
-    return _directory[1]
+    """name/alias → person (or group) id."""
+    return _names_data()["directory"]
 
 
 def forget_directory() -> None:
-    global _directory, _groups, _people_names
-    _directory = (0.0, {})
-    _groups = (0.0, {})
-    _people_names = (0.0, {}, {}, {})
-
-
-# group name/alias → group id, for spotting groups written as plain text ("GH-19랑 저녁").
-_groups: tuple[float, dict[str, int]] = (0.0, {})
+    global _options
+    _names.update(at=0.0, data=None)
+    _options = None
 
 
 def group_directory() -> dict[str, int]:
-    global _groups
-    if time.monotonic() - _groups[0] > 300:
-        names = {}
-        with db.connect() as conn:
-            for r in conn.execute("select id, name, aliases from people where kind = 'group' order by id"):
-                for n in [r["name"], *r["aliases"]]:
-                    if len(n) >= 2:
-                        names.setdefault(n, r["id"])
-        _groups = (time.monotonic(), names)
-    return _groups[1]
+    """group name/alias → group id, for spotting groups written as plain text ("GH-19랑 저녁")."""
+    return _names_data()["groups"]
 
 
 _mention_re: tuple[int, re.Pattern | None] = (0, None)
@@ -72,7 +106,6 @@ COMMON_WORDS = {"은혜", "사랑", "지혜", "소망", "기쁨", "하늘", "한
 _AFTER_GIVEN = ("이형|이누나|이오빠|이언니|이가|이는|이도|이랑|이와|이를|이한테|이에게|이네|이의|이만|이까지|이처럼|이" 
                 "|형|누나|오빠|언니|선배|후배|쌤|씨|님|가|는|은|도|랑|와|과|를|을|한테|에게|네|의|만|까지|처럼|부터")
 
-_people_names: tuple[float, dict[str, int], dict[str, int], dict[str, list[int]]] = (0.0, {}, {}, {})
 _names_re: tuple[int, re.Pattern | None, re.Pattern | None, re.Pattern | None] = (0, None, None, None)
 
 
@@ -81,23 +114,8 @@ def person_name_directory() -> tuple[dict[str, int], dict[str, int], dict[str, l
     names). A three-syllable Korean name's given name (김민수 → 민수) counts when it isn't anyone's
     name or nickname and isn't an everyday word; shared by several people (성민준, 조민준 → 민준)
     it's ambiguous: which one is worked out per entry (journal.resolve_names) or chosen by you."""
-    global _people_names
-    if time.monotonic() - _people_names[0] > 300:
-        full, every, given = {}, set(), collections.defaultdict(set)
-        with db.connect() as conn:
-            for r in conn.execute("select id, name, kind, aliases from people order by id"):
-                every.update([r["name"], *r["aliases"]])
-                if r["kind"] != "person":
-                    continue
-                for n in [r["name"], *r["aliases"]]:
-                    if len(n) >= 2:
-                        full.setdefault(n, r["id"])
-                if len(r["name"]) == 3 and all("가" <= c <= "힣" for c in r["name"]):
-                    given[r["name"][1:]].add(r["id"])
-        usable = {g: ids for g, ids in given.items() if g not in every and g not in COMMON_WORDS}
-        _people_names = (time.monotonic(), full, {g: next(iter(ids)) for g, ids in usable.items() if len(ids) == 1},
-                         {g: sorted(ids) for g, ids in usable.items() if len(ids) > 1})
-    return _people_names[1], _people_names[2], _people_names[3]
+    d = _names_data()
+    return d["full"], d["given"], d["ambiguous"]
 
 
 def _name_patterns():
@@ -137,26 +155,17 @@ def ambiguous_in_text(text: str, links: dict[str, int] | None = None, not_names=
             if m[1] not in skip and not any(m.start() < e and m.end() > s for s, e in taken)]
 
 
-_not_names: tuple[float, set[str]] = (0.0, set())
-
-
 def never_names() -> set[str]:
     """Words you said are never a name (지연, 지원: everyday words too). Setting `not_names`."""
-    global _not_names
-    if time.monotonic() - _not_names[0] > 300:
-        with db.connect() as conn:
-            r = conn.execute("select value from settings where key = 'not_names'").fetchone()
-        _not_names = (time.monotonic(), set(r["value"]) if r else set())
-    return _not_names[1]
+    return _names_data()["not_names"]
 
 
 def add_never_name(word: str) -> None:
-    global _not_names
     with db.connect() as conn:
         conn.execute("insert into settings (key, value) values ('not_names', jsonb_build_array(%s::text)) "
                      "on conflict (key) do update set value = (select jsonb_agg(distinct x) from jsonb_array_elements("
                      "settings.value || jsonb_build_array(%s::text)) x)", (word, word))
-    _not_names = (0.0, set())
+    forget_directory()
 
 
 def linked_in_text(text: str, links: dict[str, int]) -> list[tuple[int, int, int]]:
@@ -269,12 +278,21 @@ SCHOOL_NAMES = {"서울대학교": "서울대", "SNU": "서울대", "고려대�
                 "성균관대학교": "성균관대", "서강대학교": "서강대", "한양대학교": "한양대", "한국예술종합학교": "한예종"}
 
 
+_options: dict | None = None
+
+
 def detail_options(conn) -> dict:
     """Schools and majors already in use, most common first: the choices offered when editing, so the
-    same school or major is always written the same way."""
-    q = lambda col: [r["v"] for r in conn.execute(
-        f"select {col} as v from people where {col} is not null group by 1 order by count(*) desc, 1")]
-    return {"schools": q("school"), "majors": q("major")}
+    same school or major is always written the same way. Cached until someone's details change."""
+    global _options
+    if _options is None:
+        rows = conn.execute(
+            "select 'schools' as k, school as v, count(*) as n from people where school is not null group by 2 "
+            "union all select 'majors', major, count(*) from people where major is not null group by 2 "
+            "order by k, n desc, v").fetchall()
+        _options = {"schools": [r["v"] for r in rows if r["k"] == "schools"],
+                    "majors": [r["v"] for r in rows if r["k"] == "majors"]}
+    return _options
 
 
 def standard_detail(value: str, known: list[str], aliases: dict[str, str] | None = None) -> str | None:
@@ -538,8 +556,13 @@ def render_entries(entries: list[dict]) -> None:
         return
     titles = sorted({m[2].strip().rsplit("/", 1)[-1] for e in entries for m in media.LINK.finditer(e["body"])
                      if not m[1]})
+    # Ambiguous given names ("민준"): everyone it could be, for the "Who is 민준?" picker.
+    ambiguous = person_name_directory()[2]
+    cand_ids = sorted({i for ids in ambiguous.values() for i in ids})
     with db.connect() as conn:
         with conn.pipeline():
+            q_cands = conn.execute(
+                "select id, name, school, major, class_of from people where id = any(%s)", (cand_ids,))
             q_img = conn.execute(
                 "select rm.raw_id, m.name, m.sha256 from raw_media rm join media m on m.id = rm.media_id "
                 "where rm.raw_id = any(%s) order by rm.pos", ([e["id"] for e in entries],))
@@ -552,11 +575,7 @@ def render_entries(entries: list[dict]) -> None:
         images = q_img.fetchall()
         notes = {r["title"]: r["id"] for r in q_notes.fetchall()}
         picked = q_picked.fetchall()
-        # Ambiguous given names ("민준"): everyone it could be, for the "Who is 민준?" picker.
-        ambiguous = person_name_directory()[2]
-        cand_ids = sorted({i for ids in ambiguous.values() for i in ids})
-        cands = {r["id"]: r for r in conn.execute(
-            "select id, name, school, major, class_of from people where id = any(%s)", (cand_ids,))} if cand_ids else {}
+        cands = {r["id"]: r for r in q_cands.fetchall()}
     names = directory()
     for e in entries:
         # [[Name]] is the person picked for this entry when several share the name.

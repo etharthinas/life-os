@@ -1,4 +1,5 @@
-{# Who was there, by meeting (a day can have several unrelated ones). Each meeting has its own
+{# Who was there, by meeting (a day can have several unrelated ones). Drag a meeting by ⠿ to reorder,
+   drag a chip to another meeting; long press / right-click a chip for more (static/daypeople.js). Each meeting has its own
    "@ who was there" field (static/mention.js); people also come from @mentions in the text (first
    meeting) and from faces in the day's photos (📷); people only named in the text are listed
    apart as "Mentioned"; a group brings its members along under one
@@ -7,9 +8,10 @@
 {% set many = day_people | length > 1 %}
 <div id="day-people" class="day-people{% if many %} many{% endif %}">
   {% for mt in day_people %}
-  <div class="meeting" data-meeting="{{ mt.n }}">
+  <div class="meeting" data-meeting="{{ mt.n }}" data-title="{{ mt.title or 'Meeting ' ~ (mt.n + 1) }}">
     {% if many %}
     <div class="meeting-head">
+      <span class="meeting-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
       <input class="meeting-title" name="title" value="{{ mt.title }}" placeholder="Meeting {{ mt.n + 1 }}" aria-label="Meeting name"
              hx-post="/day/{{ day.isoformat() }}/meetings/{{ mt.n }}" hx-trigger="change, keyup changed delay:600ms" hx-swap="none">
       <button class="unpick" title="Remove this meeting" aria-label="Remove meeting" hx-post="/day/{{ day.isoformat() }}/meetings/{{ mt.n }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
@@ -18,7 +20,8 @@
     <ul class="chips-people">
       {% for m in mt.people %}
       {% if m.kind == "group" %}
-      <li class="group-chip{% if m.auto_group %} auto{% endif %}" style="--h: {{ hue(m.name) }}">
+      <li class="group-chip{% if m.auto_group %} auto{% endif %}" style="--h: {{ hue(m.name) }}" data-gid="{{ m.id }}" data-name="{{ m.name }}"
+          data-ids="{{ ([m.id] + m.members | map(attribute='id') | list) | join(',') }}">
         <details>
           <summary><span class="org"{% if m.auto_group %} title="{{ 'Grouped by you (묶기)' if m.picked else 'Grouped automatically: they’re all in ' ~ m.name }}"{% endif %}>{{ m.name }}<b>{{ m.members | length }}</b></span></summary>
           <div class="group-members">
@@ -35,7 +38,7 @@
         <button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
       </li>
       {% else %}
-      <li class="picked{% if m.from_photo %} from-photo{% endif %}" data-pid="{{ m.id }}">
+      <li class="picked{% if m.from_photo %} from-photo{% endif %}" data-pid="{{ m.id }}" data-name="{{ m.name }}" data-ids="{{ m.id }}">
         <a href="/people/{{ m.id }}" title="{{ 'In this day\'s photos' if m.from_photo else (m.about or '') }}">{{ avatar(m, "sm") }}<span>{{ m.name }}</span>{% if m.from_photo %}<i class="cam" aria-label="From photos">📷</i>{% endif %}</a>
         <button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
       </li>

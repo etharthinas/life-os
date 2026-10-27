@@ -73,6 +73,7 @@ def run() -> None:
             # A group or its members changed: every day's automatic group labels again.
             if people.take_regroup_request():
                 with db.connect() as conn, conn.transaction():
+                    journal.follow_whole_groups(conn)
                     journal.auto_groups(conn)
                 print("groups: re-labelled", flush=True)
         except Exception:

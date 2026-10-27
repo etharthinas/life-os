@@ -1,11 +1,11 @@
 {# 묶기: groups the selected people are all in (tightest first), or a new group of them. #}
 {% for g in found %}
 <button type="button" class="org" style="--h: {{ hue(g.name) }}" hx-post="/day/{{ day.isoformat() }}/label"
-        hx-vals='{"group_id": {{ g.id }}, "meeting": {{ meeting }}, "ids": "{{ ids | join(",") }}"}' hx-target="#day-people" hx-swap="outerHTML">{{ g.name }}<b>{{ g.size }}</b></button>
+        hx-vals='{"group_id": {{ g.id }}, "meeting": {{ meeting }}, "ids": "{{ ids | join(",") }}", "gids": "{{ gids | join(",") }}"}' hx-target="#day-people" hx-swap="outerHTML">{{ g.name }}<b>{{ g.size }}</b></button>
 {% else %}
 <span class="hint">No group has all {{ ids | length }} of them.</span>
 {% endfor %}
 <form class="label-new" hx-post="/day/{{ day.isoformat() }}/label" hx-target="#day-people" hx-swap="outerHTML">
-  <input type="hidden" name="meeting" value="{{ meeting }}"><input type="hidden" name="ids" value="{{ ids | join(',') }}">
+  <input type="hidden" name="meeting" value="{{ meeting }}"><input type="hidden" name="ids" value="{{ ids | join(',') }}"><input type="hidden" name="gids" value="{{ gids | join(',') }}">
   <input name="name" placeholder="＋ New group of them" autocomplete="off" required aria-label="New group name">
 </form>

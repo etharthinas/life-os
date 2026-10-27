@@ -817,3 +817,19 @@ form:has(input[name=kind][value=group]:checked) .if-person { display: none; }
 #toast.out { opacity: 0; transform: translateX(-50%) translateY(8px); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { #busy-bar.on, .is-busy::after { animation-duration: 3s; } #toast { animation: none; } }
+
+/* A day's meetings: drag by ⠿, drag chips between meetings, long press / right-click a chip (daypeople.js). */
+.meeting-grip { cursor: grab; color: var(--ink-3); padding: 2px 4px; font-size: var(--t-sm); touch-action: none; user-select: none; }
+.chips-people > li[data-ids] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.sortable-ghost { opacity: .35; }
+.sortable-chosen { box-shadow: 0 0 0 2px var(--accent); border-radius: 999px; }
+.meeting.sortable-chosen { border-radius: var(--r-sm); box-shadow: none; background: var(--accent-soft); }
+.day-people.many .chips-people { min-height: 30px; }
+.chip-menu { position: fixed; z-index: 120; width: min(280px, calc(100vw - 16px)); display: flex; flex-direction: column; }
+.chip-menu .q { padding: 6px 10px 2px; font-size: var(--t-xs); color: var(--ink-3); }
+.chip-menu button, .chip-menu a { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px;
+  border: 0; background: none; font: inherit; font-size: var(--t-sm); color: var(--ink); text-decoration: none; border-radius: var(--r-sm); cursor: pointer; }
+.chip-menu button:hover, .chip-menu a:hover { background: var(--sunken); }
+.chip-menu .sub { font-size: var(--t-xs); color: var(--ink-3); white-space: normal; }
+.meeting.selecting li.group-chip > details > summary { cursor: pointer; }
+.meeting.selecting li.group-chip.sel > details > summary .org { outline: 2px solid var(--accent); outline-offset: 1px; }

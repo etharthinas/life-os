@@ -431,7 +431,8 @@ def auto_groups(conn, raw_id: int | None = None) -> None:
     """Label people who were together with the group they make up (`mentions.auto_group`): on 10.7
     여재욱, 양기서, 최한결… are GH-19. A group tagged this way brings no one along; people already under a
     group you were with are left out; a group taken off that day (✕) isn't used again. A group the
-    text only names ("[[GH]]" in `People:`) is labelled the same way when they were there."""
+    text only names ("[[GH]]" in `People:`) is labelled the same way when they were there. People
+    taken out of all groups that day (`meta.ungrouped`, 전체 해제) stay unlabelled."""
     scope = {"raw": raw_id}
     conn.execute("delete from mentions where auto_group and not named_only and not picked "
                  "and (%(raw)s::bigint is null or raw_id = %(raw)s)", scope)
@@ -446,9 +447,11 @@ def auto_groups(conn, raw_id: int | None = None) -> None:
         members.setdefault(r["group_id"], set()).add(r["person_id"])
         size[r["group_id"]] = r["size"]
         orgs.setdefault(r["person_id"], set()).add(r["group_id"])
-    off = {r["id"]: set(r["meta"].get("not_there") or []) | set(r["meta"].get("dissolved_groups") or [])
-           for r in conn.execute("select id, meta from raw_entries where id = any(%s) "
-                                 "and (meta ? 'not_there' or meta ? 'dissolved_groups')", (list({r["raw_id"] for r in rows}),))}
+    off, ungrouped = {}, {}
+    for r in conn.execute("select id, meta from raw_entries where id = any(%s) and (meta ? 'not_there' "
+                          "or meta ? 'dissolved_groups' or meta ? 'ungrouped')", (list({r["raw_id"] for r in rows}),)):
+        off[r["id"]] = set(r["meta"].get("not_there") or []) | set(r["meta"].get("dissolved_groups") or [])
+        ungrouped[r["id"]] = set(r["meta"].get("ungrouped") or [])
     at: dict[tuple[int, int], dict] = {}
     for r in rows:
         mt = at.setdefault((r["raw_id"], r["meeting"]), {"people": set(), "groups": set(), "via": set()})
@@ -461,6 +464,7 @@ def auto_groups(conn, raw_id: int | None = None) -> None:
     want = []
     for (rid, meeting), mt in at.items():
         loose = {p for p in mt["people"] if not (orgs.get(p, set()) & mt["groups"])}  # not under a group already
+        loose -= ungrouped.get(rid, set())  # taken out of every group that day (전체 해제)
         usable = {g: m for g, m in members.items() if g not in off.get(rid, ()) and g not in mt["groups"]}
         want += [(rid, g, meeting) for g in best_groups(loose, usable, size)]
     if want:
@@ -506,12 +510,18 @@ def pick_person(d: date, person_id: int, meeting: int = 0) -> None:
         sync(conn, doc["id"], doc["body"])
 
 
-def label_group(d: date, meeting: int, group_id: int, person_ids: list[int] = ()) -> None:
+def label_group(d: date, meeting: int, group_id: int, person_ids: list[int] = (), group_ids: list[int] = ()) -> None:
     """묶기: show the people of a meeting under this group's label, by hand. It brings no one else
     along, takes the chosen people from any other label (automatic or 묶기) in that meeting, and
-    undoes an earlier ✕ on the group for that day."""
+    undoes an earlier ✕ on the group for that day. Groups chosen whole (`group_ids`) give up their
+    label: their people (in `person_ids`) go under the new one."""
     raw_id = doc_id(d)
     with db.connect() as conn, conn.transaction():
+        doc = conn.execute("select id from raw_entries where id = %s", (raw_id,)).fetchone()
+        for g in group_ids:
+            if g != group_id:
+                _dissolve(conn, doc, g, keep=list(person_ids))
+        _drop_from(conn, raw_id, "ungrouped", list(person_ids))
         if person_ids:
             conn.execute("delete from mentions m where m.raw_id = %s and m.meeting = %s and m.auto_group "
                          "and m.person_id <> %s and exists (select 1 from memberships ms "
@@ -542,11 +552,120 @@ def unpick_person(d: date, person_id: int) -> None:
         if row and row["kind"] == "group":
             _dissolve(conn, doc, person_id, keep=[])
         else:
+            _freeze_groups_of(conn, doc["id"], person_id)
             conn.execute("update raw_entries set meta = jsonb_set(meta, '{not_there}', "
                          "coalesce(meta -> 'not_there', '[]'::jsonb) || to_jsonb(%s::bigint)) where id = %s",
                          (person_id, doc["id"]))
             conn.execute("delete from mentions where raw_id = %s and person_id = %s", (doc["id"], person_id))
         sync(conn, doc["id"], doc["body"])
+
+
+def _freeze_groups_of(conn, raw_id: int, person_id: int) -> None:
+    """Someone taken out of a group you were with as a whole: from now on that day it's those
+    people, not the group. Its tag becomes a label over them (like 묶기) and the people it brought
+    are tagged one by one, so someone joining the group later isn't added to that day."""
+    from .people import all_members
+
+    whole = conn.execute("select m.person_id from mentions m join people p on p.id = m.person_id "
+                         "where m.raw_id = %s and p.kind = 'group' and not m.auto_group and not m.named_only",
+                         (raw_id,)).fetchall()
+    for g in (r["person_id"] for r in whole):
+        if person_id not in all_members(conn, g):
+            continue
+        conn.execute("update mentions set via_group = null, picked = true where raw_id = %s and via_group = %s", (raw_id, g))
+        conn.execute("update mentions set auto_group = true, picked = true where raw_id = %s and person_id = %s", (raw_id, g))
+
+
+# Groups you were with as a whole (tagged directly, nobody taken out: not a label over some people)
+# follow the group: someone who joins it later is at those days too, someone who leaves isn't.
+WHOLE_GROUPS_SQL = """
+with recursive tree(root, id) as (
+    select id, id from people where kind = 'group'
+    union select t.root, c.id from people c join tree t on c.parent_id = t.id
+), whole as (
+    select m.raw_id, m.person_id as g, m.meeting, r.meta from mentions m
+    join people gp on gp.id = m.person_id and gp.kind = 'group'
+    join raw_entries r on r.id = m.raw_id
+    where not m.auto_group and not m.named_only and r.meta ? 'type' and r.meta ->> 'type' = 'daily'
+), want as (
+    select distinct on (w.raw_id, ms.person_id) w.raw_id, ms.person_id, w.g, w.meeting
+    from whole w join tree t on t.root = w.g join memberships ms on ms.group_id = t.id
+    join people p on p.id = ms.person_id and p.kind = 'person'
+    where ms.person_id is distinct from (select (value ->> 'person_id')::bigint from settings where key = 'me')
+      and not coalesce(w.meta -> 'not_there', '[]') @> to_jsonb(ms.person_id)
+    order by w.raw_id, ms.person_id, w.g
+), added as (
+    insert into mentions (raw_id, person_id, via_group, meeting)
+    select raw_id, person_id, g, meeting from want
+    on conflict (raw_id, person_id) do update set via_group = excluded.via_group, meeting = excluded.meeting,
+        named_only = false where mentions.named_only
+    returning 1
+)
+delete from mentions v where v.via_group is not null and not v.picked
+  and not exists (select 1 from tree t join memberships ms on ms.group_id = t.id
+                  where t.root = v.via_group and ms.person_id = v.person_id)
+"""
+
+
+def follow_whole_groups(conn) -> None:
+    """After a group's members changed: `WHOLE_GROUPS_SQL` on every day."""
+    conn.execute(WHOLE_GROUPS_SQL)
+
+
+def _drop_from(conn, raw_id: int, key: str, ids: list[int]) -> None:
+    """Take these ids out of the entry's `meta[key]` list."""
+    if ids:
+        conn.execute(f"update raw_entries set meta = jsonb_set(meta, '{{{key}}}', coalesce((select jsonb_agg(x) "
+                     f"from jsonb_array_elements(meta -> '{key}') x where not x <@ to_jsonb(%s::bigint[])), '[]')) "
+                     f"where id = %s and meta ? '{key}'", (ids, raw_id))
+
+
+def ungroup(d: date, group_id: int, member_ids: list[int]) -> None:
+    """전체 해제: the group's label comes off and its people stay, each on their own, without being
+    put under another group (bigger or smaller) instead (`meta.ungrouped`, until 묶기 labels them)."""
+    with db.connect() as conn, conn.transaction():
+        doc = find(conn, d)
+        if not doc:
+            return
+        on_day = {r["person_id"] for r in conn.execute("select person_id from mentions where raw_id = %s", (doc["id"],))}
+        keep = [m for m in member_ids if m in on_day]
+        _dissolve(conn, doc, group_id, keep)
+        conn.execute("update raw_entries set meta = jsonb_set(meta, '{ungrouped}', (select coalesce(jsonb_agg(distinct x), '[]') "
+                     "from jsonb_array_elements(coalesce(meta -> 'ungrouped', '[]') || to_jsonb(%s::bigint[])) x)) "
+                     "where id = %s", (keep, doc["id"]))
+        sync(conn, doc["id"], doc["body"])
+
+
+def move_to_meeting(d: date, ids: list[int], meeting: int) -> None:
+    """Drag a chip to another meeting: these people (or a group, with the people under it) go there.
+    A group labelled automatically that you moved stays where you put it."""
+    meetings = day_people(d)
+    if not (0 <= meeting < len(meetings)) or not ids:
+        return
+    with db.connect() as conn, conn.transaction():
+        doc = find(conn, d)
+        if not doc:
+            return
+        conn.execute("update mentions set meeting = %s where raw_id = %s and (person_id = any(%s) or via_group = any(%s))",
+                     (meeting, doc["id"], ids, ids))
+        conn.execute("update mentions m set picked = true from people p where p.id = m.person_id and p.kind = 'group' "
+                     "and m.raw_id = %s and m.person_id = any(%s) and m.auto_group", (doc["id"], ids))
+        sync(conn, doc["id"], doc["body"])
+
+
+def reorder_meetings(d: date, order: list[int]) -> None:
+    """Drag meetings into a new order: `order` lists the current meeting numbers as they should go."""
+    meetings = day_people(d)
+    if sorted(order) != list(range(len(meetings))):
+        return
+    with db.connect() as conn, conn.transaction():
+        doc = find(conn, d)
+        if not doc:
+            return
+        new = {old: i for i, old in enumerate(order)}
+        conn.execute("update mentions set meeting = (%s::int[])[meeting + 1] where raw_id = %s",
+                     ([new[i] for i in range(len(order))], doc["id"]))
+        _set_meetings(conn, doc["id"], [meetings[old]["title"] for old in order])
 
 
 def _dissolve(conn, doc: dict, group_id: int, keep: list[int]) -> None:

@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="{{ asset('style.css') }}">
   <script src="{{ asset('mention.js') }}" defer></script>
   <script src="{{ asset('linker.js') }}" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js" defer></script>
+  <script src="{{ asset('daypeople.js') }}" defer></script>
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
   <!-- Start loading a page when a finger touches a link (or the mouse hovers it), not when it lifts. -->
   <script src="https://unpkg.com/htmx-ext-preload@2.1.0/preload.js"></script>
@@ -79,12 +81,14 @@
     // all the chosen people are in are offered below (picking one labels them, see /day/…/label).
     if (!window.labelReady) {
       window.labelReady = true;
+      // A group chosen whole (tap its chip) counts as all the people under it, and gives up its label.
       const opts = (mt) => {
-        const ids = [...mt.querySelectorAll("li[data-pid].sel")].map((li) => li.dataset.pid);
+        const ids = [...new Set([...mt.querySelectorAll("li[data-pid].sel")].map((li) => li.dataset.pid))];
+        const gids = [...mt.querySelectorAll("li.group-chip.sel")].map((li) => li.dataset.gid);
         const box = mt.querySelector(".label-opts");
         if (!ids.length) { box.innerHTML = ""; return; }
         const day = mt.closest("#day-people").querySelector(".meet-input").dataset.day;
-        htmx.ajax("GET", `/day/${day}/label/options?meeting=${mt.dataset.meeting}&ids=${ids.join(",")}`, { target: box, swap: "innerHTML" });
+        htmx.ajax("GET", `/day/${day}/label/options?meeting=${mt.dataset.meeting}&ids=${ids.join(",")}&gids=${gids.join(",")}`, { target: box, swap: "innerHTML" });
       };
       document.addEventListener("click", (e) => {
         const toggle = e.target.closest(".label-toggle");
@@ -97,10 +101,21 @@
           mt.querySelector(".label-opts").innerHTML = "";
           return;
         }
+        // In 묶기, a group's chip selects the whole group (instead of opening its member list).
+        const g = e.target.closest(".meeting.selecting li.group-chip");
+        if (g && e.target.closest("summary")) {
+          e.preventDefault();
+          const on = g.classList.toggle("sel");
+          g.querySelectorAll("li[data-pid]").forEach((x) => x.classList.toggle("sel", on));
+          opts(g.closest(".meeting"));
+          return;
+        }
         const li = e.target.closest(".meeting.selecting li[data-pid]");
         if (li && !e.target.closest(".unpick")) {
           e.preventDefault();
           li.classList.toggle("sel");
+          const chip = li.closest("li.group-chip");
+          if (chip && !li.classList.contains("sel")) chip.classList.remove("sel");
           opts(li.closest(".meeting"));
         }
       }, true);

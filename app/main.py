@@ -5,6 +5,7 @@ import hashlib
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -75,6 +76,51 @@ async def no_stale_pages(request: Request, call_next):
     elif request.url.path.startswith("/static/") and "v" in request.query_params:
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
+
+
+class FollowRedirects:
+    """Saving a form answers "see /day/…" (303) and the browser then asks for that page: a second
+    trip to the server. For htmx's requests the page comes straight back with the answer instead
+    (HX-Push-Url puts its address in the bar, as following the redirect did)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        headers = dict(scope.get("headers") or []) if scope["type"] == "http" else {}
+        if scope["type"] != "http" or scope["method"] != "POST" or b"hx-request" not in headers:
+            return await self.app(scope, receive, send)
+        follow = None
+
+        async def held(msg):
+            nonlocal follow
+            if msg["type"] == "http.response.start":
+                loc = dict(msg.get("headers") or []).get(b"location", b"").decode()
+                if msg["status"] in (302, 303) and loc.startswith("/") and not loc.startswith("//"):
+                    follow = loc
+                    return
+            if follow is None:
+                await send(msg)
+
+        await self.app(scope, receive, held)
+        if follow is None:
+            return
+        path, _, query = follow.partition("?")
+        get = {**scope, "method": "GET", "path": unquote(path), "raw_path": path.encode(), "query_string": query.encode(),
+               "headers": [(k, v) for k, v in scope["headers"] if k not in (b"content-type", b"content-length")]}
+
+        async def nothing():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def answer(msg):
+            if msg["type"] == "http.response.start" and headers.get(b"hx-boosted") == b"true":
+                msg = {**msg, "headers": [*msg.get("headers", []), (b"hx-push-url", follow.encode())]}
+            await send(msg)
+
+        await self.app(get, nothing, answer)
+
+
+app.add_middleware(FollowRedirects)
 
 
 def _render(request: Request, name: str, **ctx):
@@ -471,7 +517,7 @@ limit 8
 
 
 @app.get("/day/{d}/label/options", response_class=HTMLResponse)
-def day_label_options(request: Request, d: str, ids: str = "", meeting: int = 0):
+def day_label_options(request: Request, d: str, ids: str = "", meeting: int = 0, gids: str = ""):
     """묶기: the groups the selected people are all in, and making a new group of them."""
     day = _parse_day(d)
     pids = [int(x) for x in ids.split(",") if x.isdigit()]
@@ -479,12 +525,13 @@ def day_label_options(request: Request, d: str, ids: str = "", meeting: int = 0)
         return HTMLResponse("")
     with db.connect() as conn:
         found = conn.execute(LABEL_OPTIONS_SQL, {"ids": pids}).fetchall()
-    return _render(request, "_label_options.html", day=day, found=found, ids=pids, meeting=meeting)
+    return _render(request, "_label_options.html", day=day, found=found, ids=pids, meeting=meeting,
+                   gids=[int(x) for x in gids.split(",") if x.isdigit()])
 
 
 @app.post("/day/{d}/label", response_class=HTMLResponse)
 def day_label(request: Request, d: str, meeting: int = Form(0), group_id: int | None = Form(None),
-              name: str = Form(""), ids: str = Form("")):
+              name: str = Form(""), ids: str = Form(""), gids: str = Form("")):
     """묶기 → a group: label the meeting's people with it. A new name makes the group, with them in it."""
     day = _parse_day(d)
     pids = [int(x) for x in ids.split(",") if x.isdigit()]
@@ -494,7 +541,7 @@ def day_label(request: Request, d: str, meeting: int = Form(0), group_id: int | 
         group_id = people.create(name, kind="group")["id"]
         for pid in pids:
             people.join_org(pid, group_id)
-    journal.label_group(day, meeting, group_id, pids)
+    journal.label_group(day, meeting, group_id, pids, [int(x) for x in gids.split(",") if x.isdigit()])
     return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
 
 
@@ -502,6 +549,29 @@ def day_label(request: Request, d: str, meeting: int = Form(0), group_id: int | 
 def day_add_meeting(request: Request, d: str):
     day = _parse_day(d)
     journal.add_meeting(day)
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
+
+
+@app.post("/day/{d}/meetings/order", response_class=HTMLResponse)
+def day_reorder_meetings(request: Request, d: str, order: str = Form("")):
+    day = _parse_day(d)
+    journal.reorder_meetings(day, [int(x) for x in order.split(",") if x.isdigit()])
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
+
+
+@app.post("/day/{d}/move", response_class=HTMLResponse)
+def day_move_people(request: Request, d: str, ids: str = Form(""), meeting: int = Form(0)):
+    """A chip dragged to another meeting (a group's chip carries the people under it)."""
+    day = _parse_day(d)
+    journal.move_to_meeting(day, [int(x) for x in ids.split(",") if x.isdigit()], meeting)
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
+
+
+@app.post("/day/{d}/groups/{group_id}/ungroup", response_class=HTMLResponse)
+def day_ungroup(request: Request, d: str, group_id: int, ids: str = Form("")):
+    """전체 해제 (long press / right-click on a group): the label goes, its people stay, ungrouped."""
+    day = _parse_day(d)
+    journal.ungroup(day, group_id, [int(x) for x in ids.split(",") if x.isdigit()])
     return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
 
 
