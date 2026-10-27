@@ -96,13 +96,4 @@
   </article>
 </section>
 
-{% if notes %}
-<section class="section">
-  <div class="section-head"><h2>Notes from this day<span class="count">{{ notes | length }}</span></h2></div>
-  <ul class="card results">
-    {% for n in notes %}<li><article><div class="top"><a href="/notes/{{ n.id }}">{{ n.meta.title or "Note" }}</a><span>{{ n.meta.type }}</span></div>
-      <p class="excerpt">{{ n.body | note_body(160) }}</p></article></li>{% endfor %}
-  </ul>
-</section>
-{% endif %}
 {% endblock %}

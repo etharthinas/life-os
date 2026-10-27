@@ -67,14 +67,14 @@ def load_day(d: date) -> dict:
                 "select * from todos where status = 'open' order by due_on nulls last, priority, created_at")
             q_entries = conn.execute(
                 "select id, kind, source, body, occurred_at, meta from raw_entries "
-                "where occurred_at >= %s and occurred_at < %s order by occurred_at", (lo, hi))
+                "where meta ->> 'type' = 'daily' and occurred_at >= %s and occurred_at < %s order by occurred_at", (lo, hi))
             q_day_todos = conn.execute(DAY_TODOS_SQL, _day_todos_args(d))
             q_people = conn.execute(journal.DAY_PEOPLE_SQL, (lo, hi))
-            # Entry counts for the week strip (Sun–Sat around the day).
+            # Which days of the week strip (Sun–Sat around the day) have a log.
             w_lo = _bounds(d - timedelta(days=(d.weekday() + 1) % 7))[0]
             q_week = conn.execute(
                 "select (occurred_at at time zone %s)::date as day, count(*) as n from raw_entries "
-                "where occurred_at >= %s and occurred_at < %s group by 1",
+                "where meta ->> 'type' = 'daily' and occurred_at >= %s and occurred_at < %s group by 1",
                 (str(config.TZ), w_lo, w_lo + timedelta(days=7)))
         settings = {r["key"]: r["value"] for r in q_settings.fetchall()}
         return {
@@ -172,7 +172,7 @@ def load_month(year: int, month: int) -> dict:
                 "and status <> 'dropped' order by priority, id", (days_[0], days_[-1]))
             q_logs = conn.execute(
                 "select (occurred_at at time zone %s)::date as day, count(*) as n from raw_entries "
-                "where occurred_at >= %s and occurred_at < %s group by 1", (str(config.TZ), lo, hi))
+                "where meta ->> 'type' = 'daily' and occurred_at >= %s and occurred_at < %s group by 1", (str(config.TZ), lo, hi))
             q_bdays = conn.execute(
                 "select id, name, birth_month, birth_day, birth_year from people "
                 "where kind = 'person' and birth_month is not null and birth_day is not null and not hide_birthday")

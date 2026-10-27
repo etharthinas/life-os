@@ -283,7 +283,6 @@ def day_view(request: Request, d: str | None = None):
                    all_day=[e for e in data["events"] if e["all_day"]], timed=timed, week=week,
                    blocks=data["blocks"], day_todos=data["day_todos"], day_people=data["meetings"],
                    doc=next((e for e in data["entries"] if e["meta"].get("type") == "daily"), None),
-                   notes=[e for e in data["entries"] if e["kind"] == "note" and e["meta"].get("type") != "daily"],
                    connected=bool(data["calendars"]), settings=data["settings"])
 
 
