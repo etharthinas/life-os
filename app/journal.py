@@ -335,11 +335,14 @@ def sync(conn, raw_id: int, body: str) -> None:
     named |= fm_groups
     met = {x for x in met - away if not (kinds.get(x) == "group" and x in dissolved)}
     named = {x for x in named - met - away if not (kinds.get(x) == "group" and x in dissolved)}
+    # Re-derived tags come back in the meeting they were in (you may have dragged them there).
+    was_at = {r["person_id"]: r["meeting"] for r in conn.execute(
+        "select person_id, meeting from mentions where raw_id = %s", (raw_id,))}
     conn.execute("delete from mentions where raw_id = %s and (not picked or person_id = any(%s))",
                  (raw_id, [x for x in away if x is not None]))
-    rows = [(raw_id, x, False) for x in sorted(met)] + [(raw_id, x, True) for x in sorted(named)]
+    rows = [(raw_id, x, False, was_at.get(x, 0)) for x in sorted(met)] + [(raw_id, x, True, was_at.get(x, 0)) for x in sorted(named)]
     if rows:
-        conn.cursor().executemany("insert into mentions (raw_id, person_id, named_only) values (%s, %s, %s) "
+        conn.cursor().executemany("insert into mentions (raw_id, person_id, named_only, meeting) values (%s, %s, %s, %s) "
                                   "on conflict do nothing", rows)
     groups = conn.execute(
         "select m.person_id, m.meeting from mentions m join people p on p.id = m.person_id "
@@ -357,7 +360,7 @@ def sync(conn, raw_id: int, body: str) -> None:
     _sync_media(conn, raw_id, embeds)
     conn.execute("update raw_entries set meta = meta || jsonb_build_object('links', %s::jsonb, 'embeds', %s::jsonb) "
                  "where id = %s", (json.dumps(links, ensure_ascii=False), json.dumps(embeds, ensure_ascii=False), raw_id))
-    photo_mentions(conn, raw_id)
+    photo_mentions(conn, raw_id, was_at)
 
 
 def _sync_media(conn, raw_id: int, embeds: list[str]) -> None:
@@ -403,17 +406,18 @@ def best_groups(present: set[int], members: dict[int, set[int]], size: dict[int,
         left -= out[best]
 
 
-def photo_mentions(conn, raw_id: int | None = None) -> None:
+def photo_mentions(conn, raw_id: int | None = None, was_at: dict[int, int] | None = None) -> None:
     """Re-derive the photo tags of one journal (or all, after faces were re-tagged), then the groups
-    everyone there makes up (`auto_groups`)."""
+    everyone there makes up (`auto_groups`). `was_at`: the meeting each person was in (for one journal)."""
     found = conn.execute(PHOTO_PEOPLE_SQL, {"raw": raw_id}).fetchall()
-    args = {"raw": raw_id, "r": [r["raw_id"] for r in found], "p": [r["person_id"] for r in found]}
+    args = {"raw": raw_id, "r": [r["raw_id"] for r in found], "p": [r["person_id"] for r in found],
+            "m": [(was_at or {}).get(r["person_id"], 0) for r in found]}
     with conn.transaction():
         conn.execute("delete from mentions m where m.from_photo and not m.picked "
                      "and (%(raw)s::bigint is null or m.raw_id = %(raw)s) "
                      "and (m.raw_id, m.person_id) not in (select * from unnest(%(r)s::bigint[], %(p)s::bigint[]))", args)
-        conn.execute("insert into mentions (raw_id, person_id, from_photo) "
-                     "select * , true from unnest(%(r)s::bigint[], %(p)s::bigint[]) on conflict (raw_id, person_id) "
+        conn.execute("insert into mentions (raw_id, person_id, meeting, from_photo) "
+                     "select *, true from unnest(%(r)s::bigint[], %(p)s::bigint[], %(m)s::int[]) on conflict (raw_id, person_id) "
                      "do update set from_photo = true, named_only = false where mentions.named_only", args)
         auto_groups(conn, raw_id)
 
