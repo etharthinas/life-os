@@ -833,3 +833,13 @@ form:has(input[name=kind][value=group]:checked) .if-person { display: none; }
 .chip-menu .sub { font-size: var(--t-xs); color: var(--ink-3); white-space: normal; }
 .meeting.selecting li.group-chip > details > summary { cursor: pointer; }
 .meeting.selecting li.group-chip.sel > details > summary .org { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 묶기 opens every group: show its people in the flow (a row of chips under the group), not as a
+   popover, so they don't cover the meeting below or the group choices. */
+.meeting.selecting li.group-chip { flex-basis: 100%; flex-wrap: wrap; align-items: flex-start; border-radius: var(--r-md); }
+.meeting.selecting li.group-chip > details { flex: 1; min-width: 0; }
+.meeting.selecting .group-members { position: static; width: auto; margin-top: 4px; padding: 0 0 2px 10px; border: 0; box-shadow: none; background: none; }
+.meeting.selecting .group-members > .hint { display: none; }
+.meeting.selecting .group-members ul { flex-direction: row; flex-wrap: wrap; gap: 4px; max-height: none; overflow: visible; }
+.meeting.selecting .group-members li { border-radius: 999px; background: var(--sunken); padding-right: 4px; }
+.meeting.selecting .group-members li a { padding: 2px 6px 2px 2px; }
+.meeting.selecting .group-members .unpick { display: none; }
