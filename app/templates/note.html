@@ -9,7 +9,7 @@
 </div></header>
 <article class="card note-page" id="note-body">
   <div class="note-tools"><a class="btn btn-quiet" href="/entries/{{ n.id }}/edit" hx-get="/entries/{{ n.id }}/edit?back=/notes/{{ n.id }}" hx-target="#note-body" hx-swap="outerHTML" hx-push-url="false">Edit</a></div>
-  <div class="prose">{{ n.html }}</div>
+  <div class="prose" data-raw="{{ n.id }}">{{ n.html }}</div>
   {% include "_extra_photos.html" %}
 </article>
 {% if n.meta.path %}<p class="hint">{{ n.meta.path }}</p>{% endif %}

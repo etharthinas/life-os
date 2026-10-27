@@ -76,7 +76,7 @@ ul { list-style: none; margin: 0; padding: 0; }
   -webkit-backdrop-filter: saturate(1.6) blur(18px); backdrop-filter: saturate(1.6) blur(18px);
   border-top: 1px solid var(--rule);
 }
-.tabbar ul { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); }
+.tabbar ul { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); }
 .tabbar a {
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0;
   color: var(--ink-3); font-size: 10.5px; font-weight: 500; letter-spacing: .01em; text-decoration: none;
@@ -722,3 +722,71 @@ details.pop.org-filter[open] > .pop-body { left: 0; right: auto; }
 .timeline-more > summary { list-style: none; cursor: pointer; margin-top: 8px; display: inline-flex; }
 .timeline-more > summary::-webkit-details-marker { display: none; }
 .timeline-more[open] > summary { display: none; }
+.day-people-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.day-people-acts .hint { font-size: var(--t-xs); }
+.scan-status { font-size: var(--t-sm); color: var(--ink-2); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+/* "Tag people from photos" only when the log has photos. */
+.daylog:not(:has(.daylog-main img)) .tag-faces { display: none; }
+.field-new { display: grid; grid-template-columns: 1fr 1.4fr; gap: 6px; }
+/* Back / forward, top left of every page. */
+.histnav { display: flex; gap: 4px; margin-bottom: -18px; }
+.histnav button { width: 30px; height: 30px; padding: 0; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface);
+  color: var(--ink-2); display: grid; place-items: center; }
+.histnav button:hover { color: var(--ink); }
+.histnav svg { width: 16px; height: 16px; }
+/* "Mentioned": each one is a button that adds them as there. */
+.day-people .mentioned button { border: none; background: none; padding: 0; font: inherit; color: var(--ink-2); cursor: pointer; }
+.day-people .mentioned button:hover { color: var(--accent); }
+.histnav button:disabled { opacity: .35; }
+/* 묶기: choose people, then a group. */
+.label-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; }
+.label-toggle { font-size: var(--t-xs); padding: 4px 6px; }
+.label-hint { display: none; font-size: var(--t-xs); }
+.meeting.selecting .label-hint { display: inline; }
+.label-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
+.label-opts:empty { display: none; }
+.label-opts .org { border: none; cursor: pointer; padding: 5px 10px; font-size: var(--t-sm); }
+.label-opts .label-new input { padding: 5px 12px; border-radius: 999px; border: 1px dashed var(--rule); background: none; font-size: var(--t-sm); width: 12em; }
+.meeting.selecting li[data-pid] { cursor: pointer; }
+.meeting.selecting li[data-pid] a { pointer-events: none; }
+.meeting.selecting li[data-pid].sel { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 999px; }
+/* A person's details, edited in place: label | value rows; inputs look like text until touched. */
+.details-form { padding: 2px 16px; display: grid; grid-template-columns: max-content 1fr; }
+.details-form label { display: contents; }
+.details-form label > span { padding: 11px 16px 11px 0; color: var(--ink-2); font-size: var(--t-sm); border-top: 1px solid var(--rule); }
+.details-form label > input, .details-form label > select { border: none; border-top: 1px solid var(--rule); border-radius: 0;
+  background: none; padding: 10px 0; font-size: var(--t-md); color: var(--ink); width: 100%; min-width: 0; }
+.details-form label:first-child > * { border-top: none; }
+.details-form input::placeholder { color: var(--ink-3); }
+.details-form input:focus, .details-form select:focus { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.details-form select { appearance: none; cursor: pointer; }
+.details-save { grid-column: 1 / -1; display: none; justify-content: flex-end; gap: 8px; padding: 10px 0 12px; border-top: 1px solid var(--rule); }
+.details-form.dirty .details-save { display: flex; }
+/* An ambiguous given name ("민준"): dotted, with a "Who is 민준?" picker on hover or tap. */
+.who-is { position: relative; display: inline; cursor: help; }
+.who-is > a, .who-is > span:first-child { text-decoration: underline dotted 1.5px; text-underline-offset: 3px; }
+.who-is.open > span:first-child { color: var(--warn); }
+.who-is.guess > a { text-decoration-style: dashed; }
+.who-pick { display: none; position: absolute; z-index: 30; left: 0; top: 100%; min-width: 200px; margin-top: 0; padding: 4px;
+  flex-direction: column; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow);
+  font-size: var(--t-sm); font-weight: 400; }
+.who-is:hover .who-pick, .who-is:focus-within .who-pick, .who-is.shown .who-pick { display: flex; }
+.who-pick .q { padding: 4px 8px; color: var(--ink-3); font-size: var(--t-xs); }
+.who-pick button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border: none; background: none;
+  padding: 6px 8px; border-radius: var(--r-sm); text-align: left; color: var(--ink); cursor: pointer; }
+.who-pick button:hover, .who-pick button.on { background: var(--accent-soft); }
+.who-pick small { color: var(--ink-3); font-size: var(--t-xs); }
+.meeting:not(:has(li[data-pid])) .label-tools { display: none; }
+/* Select → Link: the menu, and the 🔗 button by a selection on a phone. */
+.link-menu { position: fixed; z-index: 120; width: min(280px, calc(100vw - 16px)); }
+.link-menu .q { padding: 6px 8px 2px; font-size: var(--t-xs); color: var(--ink-3); }
+.link-menu input { margin: 4px; padding: 6px 10px; border-radius: var(--r-sm); font-size: var(--t-sm); }
+.link-menu .link-results { display: flex; flex-direction: column; max-height: 40vh; overflow-y: auto; }
+.link-chip { position: fixed; z-index: 110; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--rule);
+  background: var(--surface); color: var(--ink); font-size: var(--t-sm); box-shadow: var(--shadow); }
+/* A name's menu: undo buttons. */
+.who-pick button.undo { flex-direction: row; color: var(--ink-2); font-size: var(--t-xs); border-top: 1px solid var(--rule); border-radius: 0; }
+.who-pick button.undo + button.undo { border-top: none; }
+.who-is.linked > a { text-decoration: none; }
+form:has(input[name=kind][value=group]:checked) .if-person { display: none; }

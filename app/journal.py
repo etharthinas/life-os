@@ -1,4 +1,4 @@
-"""Day journals: one editable document per day, either an imported Obsidian daily note or one
+"""Day journals: one editable document per day, either an imported daily note or one
 written here. Quick captures (web, Telegram) are appended to it as timestamped paragraphs.
 
 The text is the source of truth for photos (its ![[embeds]]) and for linked people (its [[links]],
@@ -10,7 +10,7 @@ import json
 from datetime import date, datetime, time, timedelta
 
 from . import capture, config, db, media
-from .obsidian import FRONTMATTER, person_names, split_frontmatter, wikilinks
+from .notetext import FRONTMATTER, person_names, split_frontmatter, wikilinks
 
 
 def _bounds(d: date) -> tuple[datetime, datetime]:
@@ -100,9 +100,9 @@ def merge_logs() -> int:
 
 def strip_templates() -> int:
     """One-off: take the daily-note template's boilerplate and empty headings out of every entry
-    (see obsidian.strip_template), and re-derive everyone's people (met vs. only named, names
+    (see notetext.strip_template), and re-derive everyone's people (met vs. only named, names
     written as plain text). Returns entries whose text changed."""
-    from .obsidian import strip_template
+    from .notetext import strip_template
 
     with db.connect() as conn:
         rows = conn.execute("select id, body from raw_entries").fetchall()
@@ -145,6 +145,142 @@ def save_day(d: date, text: str, source: str, media_ids=()) -> int:
     return raw_id
 
 
+# How well each candidate fits the people already there: entries they were in together, groups
+# they share (×3), and being there that day already (+100).
+FIT_SQL = """
+select c.id,
+       (select count(*) from mentions a join mentions b on b.raw_id = a.raw_id
+        where a.person_id = c.id and b.person_id = any(%(met)s) and b.person_id <> c.id
+          and not a.named_only and not b.named_only and a.raw_id <> %(raw)s)
+     + 3 * (select count(*) from memberships x join memberships y on y.group_id = x.group_id
+            where x.person_id = c.id and y.person_id = any(%(met)s) and y.person_id <> c.id)
+     + case when c.id = any(%(met)s) then 100 else 0 end as fit
+from unnest(%(cands)s::bigint[]) as c(id)
+"""
+
+
+def guess(fit: dict[int, int]) -> int | None:
+    """The clear favourite: someone fits (more than nothing) at least twice as well as anyone else."""
+    ranked = sorted(fit.items(), key=lambda kv: -kv[1])
+    if not ranked or ranked[0][1] <= 0:
+        return None
+    if len(ranked) > 1 and ranked[0][1] < 2 * ranked[1][1]:
+        return None
+    return ranked[0][0]
+
+
+def resolve_names(conn, raw_id: int, text: str, meta: dict, met: set[int]) -> dict[str, int]:
+    """Who each ambiguous given name in the text is: your choice (`meta.names`, how "you"), else the
+    clear favourite from the people around them (how "guess"), else unresolved (`meta.ambiguous`,
+    listed at /people/ambiguous). Returns name → person id."""
+    from .people import ambiguous_in_text, person_name_directory
+
+    found = sorted({n for _, _, n in ambiguous_in_text(text, meta.get("hand_links"), meta.get("not_names") or [])})
+    ambiguous = person_name_directory()[2]
+    chosen = {n: v for n, v in (meta.get("names") or {}).items() if v.get("how") == "you"}
+    names, open_ = {}, []
+    for n in found:
+        if n in chosen:
+            names[n] = chosen[n]
+            continue
+        fit = {r["id"]: r["fit"] for r in conn.execute(FIT_SQL, {"cands": ambiguous.get(n, []), "met": list(met),
+                                                                  "raw": raw_id})}
+        if (pick := guess(fit)) is not None:
+            names[n] = {"id": pick, "how": "guess"}
+        else:
+            open_.append(n)
+    names |= {n: v for n, v in chosen.items() if n not in names}  # kept even if the text changes back
+    if not found and not meta.get("ambiguous") and names == (meta.get("names") or {}):
+        return {}
+    conn.execute("update raw_entries set meta = meta || jsonb_build_object('names', %s::jsonb, 'ambiguous', %s::jsonb) "
+                 "where id = %s", (json.dumps(names), json.dumps(open_, ensure_ascii=False), raw_id))
+    meta["names"], meta["ambiguous"] = names, open_
+    return {n: v["id"] for n, v in names.items() if n in found}
+
+
+def choose_name(raw_id: int, name: str, person_id: int | None) -> None:
+    """You say who an ambiguous name in this entry is (None: back to guessing)."""
+    with db.connect() as conn, conn.transaction():
+        row = conn.execute("select body, meta from raw_entries where id = %s for update", (raw_id,)).fetchone()
+        if not row:
+            raise KeyError(raw_id)
+        names = dict(row["meta"].get("names") or {})
+        if person_id is None:
+            names.pop(name, None)
+        else:
+            names[name] = {"id": person_id, "how": "you"}
+        conn.execute("update raw_entries set meta = jsonb_set(meta, '{names}', %s::jsonb) where id = %s",
+                     (json.dumps(names, ensure_ascii=False), raw_id))
+        sync(conn, raw_id, row["body"])
+
+
+def _edit_meta(raw_id: int, change) -> None:
+    """Change an entry's meta (`change(meta)` edits it in place), then re-derive its people."""
+    with db.connect() as conn, conn.transaction():
+        row = conn.execute("select body, meta from raw_entries where id = %s for update", (raw_id,)).fetchone()
+        if not row:
+            raise KeyError(raw_id)
+        meta = dict(row["meta"])
+        change(meta)
+        conn.execute("update raw_entries set meta = %s where id = %s", (json.dumps(meta, ensure_ascii=False), raw_id))
+        sync(conn, raw_id, row["body"])
+
+
+def link_text(raw_id: int, text: str, person_id: int) -> None:
+    """Select a word → Link: everywhere it's written in this entry, it's this person (or group)."""
+    def change(meta):
+        meta["hand_links"] = {**(meta.get("hand_links") or {}), text: person_id}
+        meta["not_names"] = [x for x in meta.get("not_names") or [] if x != text]
+    _edit_meta(raw_id, change)
+
+
+def unlink_text(raw_id: int, text: str) -> None:
+    """"Not a name here": a word you linked goes back to plain text; a name found by itself
+    ("지연", which is also a word) stops counting in this entry."""
+    def change(meta):
+        links = dict(meta.get("hand_links") or {})
+        if text in links:
+            links.pop(text)
+            meta["hand_links"] = links
+        else:
+            meta["not_names"] = sorted({*(meta.get("not_names") or []), text})
+        names = dict(meta.get("names") or {})
+        names.pop(text, None)
+        meta["names"] = names
+    _edit_meta(raw_id, change)
+
+
+def resync_containing(word: str) -> int:
+    """Re-derive the people of every entry where `word` is written (after "Never a name")."""
+    n = 0
+    with db.connect() as conn:
+        for r in conn.execute("select id, body from raw_entries where body like '%%' || %s || '%%'", (word,)).fetchall():
+            with conn.transaction():
+                sync(conn, r["id"], r["body"])
+            n += 1
+    return n
+
+
+def resolve_all() -> int:
+    """One-off (after names change): work out the ambiguous names in every entry that has one."""
+    from .people import ambiguous_in_text
+
+    n = 0
+    with db.connect() as conn:
+        for r in conn.execute("select id, body from raw_entries").fetchall():
+            if ambiguous_in_text(split_frontmatter(r["body"])[1]):
+                with conn.transaction():
+                    sync(conn, r["id"], r["body"])
+                n += 1
+    return n
+
+
+def me_id(conn) -> int | None:
+    """The diary's owner (People → "This is me"), who is never tagged in their own entries."""
+    r = conn.execute("select (value ->> 'person_id')::bigint as id from settings where key = 'me'").fetchone()
+    return r["id"] if r else None
+
+
 def sync(conn, raw_id: int, body: str) -> None:
     """Re-derive linked people and photos from the text (picked people are left alone).
 
@@ -153,8 +289,9 @@ def sync(conn, raw_id: int, body: str) -> None:
     `People:`) is just mentioned
     (`named_only`): the entry shows up on their page, but it isn't a meeting (no last contact, not
     "together", no group members brought along). A group you were with (written with @, or picked)
-    tags its members under the hood (mention rows with via_group), unless it was dissolved for this
-    entry: someone was taken out of it, so the rest are tagged one by one instead.
+    tags its members under the hood (mention rows with via_group), unless it was taken off this entry
+    (`meta.dissolved_groups`). Anyone taken off by hand (`meta.not_there`) stays off, and you (the
+    diary's owner) are never tagged in your own entries.
     """
     from .people import all_members, directory, spans_in_text
 
@@ -162,13 +299,20 @@ def sync(conn, raw_id: int, body: str) -> None:
     links, embeds = wikilinks(body)
     meta = conn.execute("select meta from raw_entries where id = %s", (raw_id,)).fetchone()["meta"]
     dissolved = set(meta.get("dissolved_groups") or [])
+    away = set(meta.get("not_there") or []) | {me_id(conn)}
     # A [[Name]] means the picked person of that name when there is one, else the first such person.
     names = {**directory(), **{r["name"]: r["id"] for r in conn.execute(
         "select p.id, p.name from mentions m join people p on p.id = m.person_id "
         "where m.raw_id = %s and m.picked", (raw_id,))}}
-    spans = spans_in_text(text)
+    # Words you linked to someone by hand, and words that aren't a name here (meta.hand_links, not_names).
+    links, not_names = meta.get("hand_links") or {}, meta.get("not_names") or []
+    spans = spans_in_text(text, links=links, not_names=not_names)
     met = {names[n] for n in person_names(fm.get("People")) if n in names}
     met |= {x for st, _, x in spans if text[st] == "@"}
+    # Given names several people share ("민준"): who, from your choice or the people around them.
+    resolved = resolve_names(conn, raw_id, text, meta, met)
+    if resolved:
+        spans = spans_in_text(text, resolved, links, not_names)
     named = {names[n] for n in wikilinks(text)[0] if n in names} | {x for st, _, x in spans if text[st] != "@"}
     kinds = {r["id"]: r["kind"] for r in conn.execute("select id, kind from people where id = any(%s)",
                                                       (list(met | named),))}
@@ -176,23 +320,27 @@ def sync(conn, raw_id: int, body: str) -> None:
     fm_groups = {x for x in met if kinds.get(x) == "group"} - {x for st, _, x in spans if text[st] == "@"}
     met -= fm_groups
     named |= fm_groups
-    met = {x for x in met if not (kinds.get(x) == "group" and x in dissolved)}
-    named = {x for x in named - met if not (kinds.get(x) == "group" and x in dissolved)}
-    conn.execute("delete from mentions where raw_id = %s and not picked", (raw_id,))
+    met = {x for x in met - away if not (kinds.get(x) == "group" and x in dissolved)}
+    named = {x for x in named - met - away if not (kinds.get(x) == "group" and x in dissolved)}
+    conn.execute("delete from mentions where raw_id = %s and (not picked or person_id = any(%s))",
+                 (raw_id, [x for x in away if x is not None]))
     rows = [(raw_id, x, False) for x in sorted(met)] + [(raw_id, x, True) for x in sorted(named)]
     if rows:
         conn.cursor().executemany("insert into mentions (raw_id, person_id, named_only) values (%s, %s, %s) "
                                   "on conflict do nothing", rows)
     groups = conn.execute(
         "select m.person_id, m.meeting from mentions m join people p on p.id = m.person_id "
-        "where m.raw_id = %s and p.kind = 'group' and not m.named_only", (raw_id,)).fetchall()
-    rows = [(raw_id, m, g["person_id"], g["meeting"]) for g in groups for m in all_members(conn, g["person_id"])]
+        "where m.raw_id = %s and p.kind = 'group' and not m.named_only and not m.auto_group", (raw_id,)).fetchall()
+    rows = [(raw_id, m, g["person_id"], g["meeting"]) for g in groups for m in all_members(conn, g["person_id"])
+            if m not in away]
     if rows:
-        # Someone only named in the text who came with a group you met was there after all.
+        # Members already tagged another way (`People:`, the text, photos) are at the group's meeting
+        # (unless you put them somewhere yourself); someone only named was there after all.
         conn.cursor().executemany("insert into mentions (raw_id, person_id, via_group, meeting) "
                                   "values (%s, %s, %s, %s) on conflict (raw_id, person_id) do update "
-                                  "set via_group = excluded.via_group, meeting = excluded.meeting, named_only = false "
-                                  "where mentions.named_only", rows)
+                                  "set via_group = case when mentions.named_only then excluded.via_group "
+                                  "else mentions.via_group end, meeting = excluded.meeting, named_only = false "
+                                  "where not mentions.picked", rows)
     _sync_media(conn, raw_id, embeds)
     conn.execute("update raw_entries set meta = meta || jsonb_build_object('links', %s::jsonb, 'embeds', %s::jsonb) "
                  "where id = %s", (json.dumps(links, ensure_ascii=False), json.dumps(embeds, ensure_ascii=False), raw_id))
@@ -221,17 +369,18 @@ where (%(raw)s::bigint is null or rm.raw_id = %(raw)s)
   and not coalesce(r.meta -> 'not_there', '[]') @> to_jsonb(f.person_id)
 """
 
-# Groups (direct memberships), to label people seen together: three colleagues in a photo are that team.
-PHOTO_GROUPS_SQL = """
+# Groups (direct memberships) of the given people, with their size.
+GROUPS_OF_SQL = """
 select ms.group_id, ms.person_id, (select count(*) from memberships x where x.group_id = ms.group_id) as size
 from memberships ms join people g on g.id = ms.group_id and g.kind = 'group'
 where ms.person_id = any(%s)
 """
 
 
-def photo_groups(present: set[int], members: dict[int, set[int]], size: dict[int, int]) -> dict[int, set[int]]:
-    """Groups that the people in a day's photos make up: the group covering the most of them (the
-    smaller one on a tie: more specific) takes them, again for the rest, while it's 2 or more."""
+def best_groups(present: set[int], members: dict[int, set[int]], size: dict[int, int]) -> dict[int, set[int]]:
+    """Groups that the people at a meeting make up, as tight as possible: the group covering the
+    most of them takes them (the smaller one on a tie: GH-19 over GH when it explains them all),
+    again for the rest, while it's 2 or more."""
     left, out = set(present), {}
     while True:
         best = max(members, key=lambda g: (len(members[g] & left), -size[g], -g), default=None)
@@ -242,24 +391,10 @@ def photo_groups(present: set[int], members: dict[int, set[int]], size: dict[int
 
 
 def photo_mentions(conn, raw_id: int | None = None) -> None:
-    """Re-derive the photo tags of one journal (or all, after faces were re-tagged): the people in
-    its photos, and the groups they make up (a group tagged this way doesn't bring its absent members)."""
+    """Re-derive the photo tags of one journal (or all, after faces were re-tagged), then the groups
+    everyone there makes up (`auto_groups`)."""
     found = conn.execute(PHOTO_PEOPLE_SQL, {"raw": raw_id}).fetchall()
-    present: dict[int, set[int]] = {}
-    for r in found:
-        present.setdefault(r["raw_id"], set()).add(r["person_id"])
-    members: dict[int, set[int]] = {}
-    size: dict[int, int] = {}
-    for r in conn.execute(PHOTO_GROUPS_SQL, (list({r["person_id"] for r in found}),)):
-        members.setdefault(r["group_id"], set()).add(r["person_id"])
-        size[r["group_id"]] = r["size"]
-    hidden = {r["id"]: set(r["meta"].get("not_there") or []) for r in conn.execute(
-        "select id, meta from raw_entries where id = any(%s) and meta ? 'not_there'", (list(present),))}
-    want = []
-    for rid, ps in present.items():
-        groups = photo_groups(ps, {g: m for g, m in members.items() if g not in hidden.get(rid, ())}, size)
-        want += [(rid, x) for x in [*ps, *groups]]
-    args = {"raw": raw_id, "r": [w[0] for w in want], "p": [w[1] for w in want]}
+    args = {"raw": raw_id, "r": [r["raw_id"] for r in found], "p": [r["person_id"] for r in found]}
     with conn.transaction():
         conn.execute("delete from mentions m where m.from_photo and not m.picked "
                      "and (%(raw)s::bigint is null or m.raw_id = %(raw)s) "
@@ -267,6 +402,59 @@ def photo_mentions(conn, raw_id: int | None = None) -> None:
         conn.execute("insert into mentions (raw_id, person_id, from_photo) "
                      "select * , true from unnest(%(r)s::bigint[], %(p)s::bigint[]) on conflict (raw_id, person_id) "
                      "do update set from_photo = true, named_only = false where mentions.named_only", args)
+        auto_groups(conn, raw_id)
+
+
+# Who was at each meeting of the day journals (one, or all): people and the groups you were with.
+MET_SQL = """
+select m.raw_id, m.meeting, m.person_id, p.kind, m.via_group
+from mentions m join people p on p.id = m.person_id
+join raw_entries r on r.id = m.raw_id and r.meta ->> 'type' = 'daily'
+where not m.named_only and (not m.auto_group or m.picked) and (%(raw)s::bigint is null or m.raw_id = %(raw)s)
+"""
+
+
+def auto_groups(conn, raw_id: int | None = None) -> None:
+    """Label people who were together with the group they make up (`mentions.auto_group`): on 10.7
+    여재욱, 양기서, 최한결… are GH-19. A group tagged this way brings no one along; people already under a
+    group you were with are left out; a group taken off that day (✕) isn't used again. A group the
+    text only names ("[[GH]]" in `People:`) is labelled the same way when they were there."""
+    scope = {"raw": raw_id}
+    conn.execute("delete from mentions where auto_group and not named_only and not picked "
+                 "and (%(raw)s::bigint is null or raw_id = %(raw)s)", scope)
+    conn.execute("update mentions set auto_group = false where auto_group and not picked "
+                 "and (%(raw)s::bigint is null or raw_id = %(raw)s)", scope)
+    rows = conn.execute(MET_SQL, scope).fetchall()
+    people = {r["person_id"] for r in rows if r["kind"] == "person"}
+    members: dict[int, set[int]] = {}
+    size: dict[int, int] = {}
+    orgs: dict[int, set[int]] = {}
+    for r in conn.execute(GROUPS_OF_SQL, (list(people),)):
+        members.setdefault(r["group_id"], set()).add(r["person_id"])
+        size[r["group_id"]] = r["size"]
+        orgs.setdefault(r["person_id"], set()).add(r["group_id"])
+    off = {r["id"]: set(r["meta"].get("not_there") or []) | set(r["meta"].get("dissolved_groups") or [])
+           for r in conn.execute("select id, meta from raw_entries where id = any(%s) "
+                                 "and (meta ? 'not_there' or meta ? 'dissolved_groups')", (list({r["raw_id"] for r in rows}),))}
+    at: dict[tuple[int, int], dict] = {}
+    for r in rows:
+        mt = at.setdefault((r["raw_id"], r["meeting"]), {"people": set(), "groups": set(), "via": set()})
+        if r["kind"] == "group":
+            mt["groups"].add(r["person_id"])
+        elif r["via_group"]:
+            mt["via"].add(r["person_id"])
+        else:
+            mt["people"].add(r["person_id"])
+    want = []
+    for (rid, meeting), mt in at.items():
+        loose = {p for p in mt["people"] if not (orgs.get(p, set()) & mt["groups"])}  # not under a group already
+        usable = {g: m for g, m in members.items() if g not in off.get(rid, ()) and g not in mt["groups"]}
+        want += [(rid, g, meeting) for g in best_groups(loose, usable, size)]
+    if want:
+        conn.cursor().executemany(
+            "insert into mentions (raw_id, person_id, meeting, auto_group) values (%s, %s, %s, true) "
+            "on conflict (raw_id, person_id) do update set auto_group = true, meeting = excluded.meeting "
+            "where mentions.named_only", want)
 
 
 # --- People picker --------------------------------------------------------------------------------
@@ -279,48 +467,71 @@ def doc_id(d: date, source: str = "web") -> int:
 
 
 def pick_person(d: date, person_id: int, meeting: int = 0) -> None:
-    """Add someone (or a group, with all its members) to one of the day's meetings."""
+    """Add someone (or a group, with all its members) to one of the day's meetings. Not you. A group
+    brings back members taken off the day before."""
+    from .people import all_members
+
+    with db.connect() as conn:
+        if person_id == me_id(conn):
+            return
     raw_id = doc_id(d)
     with db.connect() as conn, conn.transaction():
+        back = [person_id, *all_members(conn, person_id)]
+        conn.execute("update raw_entries set meta = jsonb_set(meta, '{not_there}', coalesce((select jsonb_agg(x) "
+                     "from jsonb_array_elements(meta -> 'not_there') x where not x <@ to_jsonb(%s::bigint[])), '[]')) "
+                     "where id = %s and meta ? 'not_there'", (back, raw_id))
         # Picking a group again undoes an earlier "dissolve".
         conn.execute("update raw_entries set meta = jsonb_set(meta, '{dissolved_groups}', coalesce((select jsonb_agg(x) "
                      "from jsonb_array_elements(meta -> 'dissolved_groups') x where x <> to_jsonb(%s::bigint)), '[]')) "
                      "where id = %s and meta ? 'dissolved_groups'", (person_id, raw_id))
-        conn.execute("update raw_entries set meta = jsonb_set(meta, '{not_there}', coalesce((select jsonb_agg(x) "
-                     "from jsonb_array_elements(meta -> 'not_there') x where x <> to_jsonb(%s::bigint)), '[]')) "
-                     "where id = %s and meta ? 'not_there'", (person_id, raw_id))
         conn.execute("insert into mentions (raw_id, person_id, picked, meeting) values (%s, %s, true, %s) "
                      "on conflict (raw_id, person_id) do update set picked = true, via_group = null, from_photo = false, named_only = false, "
+                     "auto_group = false, "
                      "meeting = excluded.meeting", (raw_id, person_id, meeting))
         conn.execute("delete from mentions where raw_id = %s and via_group = %s", (raw_id, person_id))  # re-expanded below
         doc = conn.execute("select id, body from raw_entries where id = %s", (raw_id,)).fetchone()
         sync(conn, doc["id"], doc["body"])
 
 
-def unpick_person(d: date, person_id: int) -> None:
-    """Take someone off the day. A group goes with the members it brought; someone who came with
-    a group dissolves it (the others stay, tagged one by one). Someone [[linked]] in the text
-    stays until the link is removed; someone tagged from the photos stays off the day (a group
-    found in the photos just loses its label)."""
-    from .people import all_members
+def label_group(d: date, meeting: int, group_id: int, person_ids: list[int] = ()) -> None:
+    """묶기: show the people of a meeting under this group's label, by hand. It brings no one else
+    along, takes the chosen people from any other label (automatic or 묶기) in that meeting, and
+    undoes an earlier ✕ on the group for that day."""
+    raw_id = doc_id(d)
+    with db.connect() as conn, conn.transaction():
+        if person_ids:
+            conn.execute("delete from mentions m where m.raw_id = %s and m.meeting = %s and m.auto_group "
+                         "and m.person_id <> %s and exists (select 1 from memberships ms "
+                         "where ms.group_id = m.person_id and ms.person_id = any(%s))",
+                         (raw_id, meeting, group_id, list(person_ids)))
+        for key in ("dissolved_groups", "not_there"):
+            conn.execute(f"update raw_entries set meta = jsonb_set(meta, '{{{key}}}', coalesce((select jsonb_agg(x) "
+                         f"from jsonb_array_elements(meta -> '{key}') x where x <> to_jsonb(%s::bigint)), '[]')) "
+                         f"where id = %s and meta ? '{key}'", (group_id, raw_id))
+        conn.execute("insert into mentions (raw_id, person_id, picked, auto_group, meeting) values (%s, %s, true, true, %s) "
+                     "on conflict (raw_id, person_id) do update set picked = true, auto_group = true, named_only = false, "
+                     "via_group = null, meeting = excluded.meeting", (raw_id, group_id, meeting))
+        conn.execute("delete from mentions where raw_id = %s and via_group = %s", (raw_id, group_id))
+        doc = conn.execute("select body from raw_entries where id = %s", (raw_id,)).fetchone()
+        sync(conn, raw_id, doc["body"])
 
+
+def unpick_person(d: date, person_id: int) -> None:
+    """Take someone off the day: they stay off (`meta.not_there`), even if the text, a group or the
+    photos would bring them back; the group they were under keeps everyone else. Taking a group off
+    takes the members it brought along (not the ones tagged on their own)."""
     with db.connect() as conn, conn.transaction():
         doc = find(conn, d)
         if not doc:
             return
-        row = conn.execute("select m.via_group, m.from_photo, p.kind from mentions m join people p on p.id = m.person_id "
+        row = conn.execute("select p.kind from mentions m join people p on p.id = m.person_id "
                            "where m.raw_id = %s and m.person_id = %s", (doc["id"], person_id)).fetchone()
-        if row and row["from_photo"]:  # in the photos, but not someone you were with (or not them)
+        if row and row["kind"] == "group":
+            _dissolve(conn, doc, person_id, keep=[])
+        else:
             conn.execute("update raw_entries set meta = jsonb_set(meta, '{not_there}', "
                          "coalesce(meta -> 'not_there', '[]'::jsonb) || to_jsonb(%s::bigint)) where id = %s",
                          (person_id, doc["id"]))
-            conn.execute("delete from mentions where raw_id = %s and person_id = %s", (doc["id"], person_id))
-        elif row and row["kind"] == "group":
-            _dissolve(conn, doc, person_id, keep=[])
-        elif row and row["via_group"]:
-            g = row["via_group"]
-            _dissolve(conn, doc, g, keep=[m for m in all_members(conn, g) if m != person_id])
-        else:
             conn.execute("delete from mentions where raw_id = %s and person_id = %s", (doc["id"], person_id))
         sync(conn, doc["id"], doc["body"])
 
@@ -344,8 +555,9 @@ def _dissolve(conn, doc: dict, group_id: int, keep: list[int]) -> None:
 
 DAY_PEOPLE_SQL = """
 select p.id, p.name, p.about, p.kind, ph.sha256 as photo, m.meeting, m.picked, m.via_group, m.from_photo, m.named_only,
+       m.auto_group,
        m.via_group is null as direct,
-       case when m.from_photo then (select array_agg(ms.group_id) from memberships ms where ms.person_id = p.id) end as orgs
+       (select array_agg(ms.group_id) from memberships ms where ms.person_id = p.id) as orgs
 from raw_entries r
 join mentions m on m.raw_id = r.id
 join people p on p.id = m.person_id
@@ -357,7 +569,7 @@ order by m.meeting, p.kind desc, p.name
 
 def day_people(d: date) -> list[dict]:
     """The day's meetings, each with who was there: groups first (with the members they brought, or
-    for a group found in the photos, the members in them), then people tagged one by one; and,
+    for a group labelled automatically, its members who were there), then people tagged one by one; and,
     apart, who the text only names (`mentioned`). There's always at least one (untitled) meeting."""
     with db.connect() as conn:
         with conn.pipeline():
@@ -373,19 +585,20 @@ def meetings_from(rows: list[dict], doc: dict | None) -> list[dict]:
     titles += [""] * (n + 1 - len(titles))
     meetings = [{"n": i, "title": t, "people": [], "mentioned": []} for i, t in enumerate(titles)]
     for i, mt in enumerate(meetings):
-        mt["mentioned"] = [r for r in rows if r["meeting"] == i and r["named_only"]]
-        mine = [r for r in rows if r["meeting"] == i and not r["named_only"]]
+        mt["mentioned"] = [r for r in rows if r["meeting"] == i and r["named_only"] and not r["auto_group"]]
+        mine = [r for r in rows if r["meeting"] == i and (not r["named_only"] or r["auto_group"])]
         groups = {r["id"]: {**r, "members": []} for r in mine if r["kind"] == "group"}
         mt["people"] = list(groups.values())
+        # A group you were with, then one you grouped them under (묶기), then an automatic label.
+        order = sorted(groups, key=lambda g: (groups[g]["auto_group"], not groups[g]["picked"]))
         for r in mine:
             if r["kind"] == "group":
                 continue
-            # Seen in the photos with others from a group (tagged from the photos too): under its label.
-            seen_with = r["from_photo"] and next((g for g in r["orgs"] or [] if groups.get(g, {}).get("from_photo")), None)
-            if not r["direct"] and r["via_group"] in groups:
-                groups[r["via_group"]]["members"].append(r)
-            elif seen_with:
-                groups[seen_with]["members"].append(r)
+            # Under the group they came with, else under a group of theirs that's there too (tagged
+            # on their own, by @, `People:` or the photos, they're still part of it): 사프 (4).
+            under = r["via_group"] if r["via_group"] in groups else next((g for g in order if g in (r["orgs"] or [])), None)
+            if under:
+                groups[under]["members"].append(r)
             else:
                 mt["people"].append(r)
     return meetings
@@ -459,3 +672,5 @@ if __name__ == "__main__":
 
     if sys.argv[1:] == ["strip"]:
         print("cleaned", strip_templates(), "entries")
+    elif sys.argv[1:] == ["names"]:
+        print("worked out ambiguous names in", resolve_all(), "entries")

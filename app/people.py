@@ -6,7 +6,7 @@ import time
 from datetime import date, datetime
 
 from . import config, db, media
-from .obsidian import nfc
+from .notetext import nfc
 
 # --- Name directory -----------------------------------------------------------------------------
 # name/alias → person id, cached in-process so resolving [[links]] costs no DB round trip.
@@ -30,7 +30,7 @@ def forget_directory() -> None:
     global _directory, _groups, _people_names
     _directory = (0.0, {})
     _groups = (0.0, {})
-    _people_names = (0.0, {}, {})
+    _people_names = (0.0, {}, {}, {})
 
 
 # group name/alias → group id, for spotting groups written as plain text ("GH-19랑 저녁").
@@ -72,14 +72,15 @@ COMMON_WORDS = {"은혜", "사랑", "지혜", "소망", "기쁨", "하늘", "한
 _AFTER_GIVEN = ("이형|이누나|이오빠|이언니|이가|이는|이도|이랑|이와|이를|이한테|이에게|이네|이의|이만|이까지|이처럼|이" 
                 "|형|누나|오빠|언니|선배|후배|쌤|씨|님|가|는|은|도|랑|와|과|를|을|한테|에게|네|의|만|까지|처럼|부터")
 
-_people_names: tuple[float, dict[str, int], dict[str, int]] = (0.0, {}, {})
-_names_re: tuple[int, re.Pattern | None, re.Pattern | None] = (0, None, None)
+_people_names: tuple[float, dict[str, int], dict[str, int], dict[str, list[int]]] = (0.0, {}, {}, {})
+_names_re: tuple[int, re.Pattern | None, re.Pattern | None, re.Pattern | None] = (0, None, None, None)
 
 
-def person_name_directory() -> tuple[dict[str, int], dict[str, int]]:
-    """Names a person goes by in plain text: (full names and nicknames, given names). A
-    three-syllable Korean name's given name (김민수 → 민수) counts when no one else has it, it isn't
-    anyone's name or nickname, and it isn't an everyday word."""
+def person_name_directory() -> tuple[dict[str, int], dict[str, int], dict[str, list[int]]]:
+    """Names a person goes by in plain text: (full names and nicknames, given names, ambiguous given
+    names). A three-syllable Korean name's given name (김민수 → 민수) counts when it isn't anyone's
+    name or nickname and isn't an everyday word; shared by several people (성민준, 조민준 → 민준)
+    it's ambiguous: which one is worked out per entry (journal.resolve_names) or chosen by you."""
     global _people_names
     if time.monotonic() - _people_names[0] > 300:
         full, every, given = {}, set(), collections.defaultdict(set)
@@ -93,39 +94,95 @@ def person_name_directory() -> tuple[dict[str, int], dict[str, int]]:
                         full.setdefault(n, r["id"])
                 if len(r["name"]) == 3 and all("가" <= c <= "힣" for c in r["name"]):
                     given[r["name"][1:]].add(r["id"])
-        given = {g: next(iter(ids)) for g, ids in given.items()
-                 if len(ids) == 1 and g not in every and g not in COMMON_WORDS}
-        _people_names = (time.monotonic(), full, given)
-    return _people_names[1], _people_names[2]
+        usable = {g: ids for g, ids in given.items() if g not in every and g not in COMMON_WORDS}
+        _people_names = (time.monotonic(), full, {g: next(iter(ids)) for g, ids in usable.items() if len(ids) == 1},
+                         {g: sorted(ids) for g, ids in usable.items() if len(ids) > 1})
+    return _people_names[1], _people_names[2], _people_names[3]
 
 
-def names_in_text(text: str) -> list[tuple[int, int, int]]:
-    """(start, end, person id) of people named in plain text, without [[ ]] or @ ("민수랑 점심",
-    "Aaron said"). Whole names only: not glued to letters before (nor Latin letters after); a
-    given name needs a space, punctuation, a nickname ending or a particle after it."""
+def _name_patterns():
     global _names_re
-    full, given = person_name_directory()
+    full, given, ambiguous = person_name_directory()
     if _names_re[0] != id(full):
         alt = lambda ns: "|".join(re.escape(n) for n in sorted(ns, key=len, reverse=True))
-        _names_re = (id(full),
-                     re.compile(rf"(?<![0-9A-Za-z가-힣_@-])({alt(full)})(?![0-9A-Za-z_])") if full else None,
-                     re.compile(rf"(?<![0-9A-Za-z가-힣_@-])({alt(given)})(?=$|[^0-9A-Za-z가-힣_]|(?:{_AFTER_GIVEN}))")
-                     if given else None)
+        as_given = lambda ns: re.compile(
+            rf"(?<![0-9A-Za-z가-힣_@-])({alt(ns)})(?=$|[^0-9A-Za-z가-힣_]|(?:{_AFTER_GIVEN}))") if ns else None
+        _names_re = (id(full), re.compile(rf"(?<![0-9A-Za-z가-힣_@-])({alt(full)})(?![0-9A-Za-z_])") if full else None,
+                     as_given(given), as_given(ambiguous))
+    return _names_re[1:], (full, given, ambiguous)
+
+
+def names_in_text(text: str, resolved: dict[str, int] | None = None) -> list[tuple[int, int, int]]:
+    """(start, end, person id) of people named in plain text, without [[ ]] or @ ("민수랑 점심",
+    "Aaron said"). Whole names only: not glued to letters before (nor Latin letters after); a
+    given name needs a space, punctuation, a nickname ending or a particle after it. An ambiguous
+    given name counts only once `resolved` (name → person id) says who it is."""
+    (p_full, p_given, p_amb), (full, given, _) = _name_patterns()
     out = []
-    for pat, names in ((_names_re[1], full), (_names_re[2], given)):
+    for pat, names in ((p_full, full), (p_given, given), (p_amb, resolved or {})):
         if pat:
-            out += [(m.start(), m.end(), names[m[1]]) for m in pat.finditer(text)]
+            out += [(m.start(), m.end(), names[m[1]]) for m in pat.finditer(text) if m[1] in names]
     return out
 
 
-def spans_in_text(text: str) -> list[tuple[int, int, int]]:
-    """@mentions, and group and people names written as plain text, in order, not overlapping."""
+def ambiguous_in_text(text: str, links: dict[str, int] | None = None, not_names=()) -> list[tuple[int, int, str]]:
+    """(start, end, name) of given names several people share ("민준이형"), where nothing longer
+    (a full name, an @mention, a group) covers them."""
+    (_, _, p_amb), _ = _name_patterns()
+    if not p_amb:
+        return []
+    taken = [(s, e) for s, e, _ in spans_in_text(text, links=links)]
+    skip = set(not_names) | never_names()
+    return [(m.start(), m.end(), m[1]) for m in p_amb.finditer(text)
+            if m[1] not in skip and not any(m.start() < e and m.end() > s for s, e in taken)]
+
+
+_not_names: tuple[float, set[str]] = (0.0, set())
+
+
+def never_names() -> set[str]:
+    """Words you said are never a name (지연, 지원: everyday words too). Setting `not_names`."""
+    global _not_names
+    if time.monotonic() - _not_names[0] > 300:
+        with db.connect() as conn:
+            r = conn.execute("select value from settings where key = 'not_names'").fetchone()
+        _not_names = (time.monotonic(), set(r["value"]) if r else set())
+    return _not_names[1]
+
+
+def add_never_name(word: str) -> None:
+    global _not_names
+    with db.connect() as conn:
+        conn.execute("insert into settings (key, value) values ('not_names', jsonb_build_array(%s::text)) "
+                     "on conflict (key) do update set value = (select jsonb_agg(distinct x) from jsonb_array_elements("
+                     "settings.value || jsonb_build_array(%s::text)) x)", (word, word))
+    _not_names = (0.0, set())
+
+
+def linked_in_text(text: str, links: dict[str, int]) -> list[tuple[int, int, int]]:
+    """Words you linked to someone by hand (select → Link): every place they're written."""
+    if not links:
+        return []
+    pat = re.compile("|".join(re.escape(t) for t in sorted(links, key=len, reverse=True)))
+    return [(m.start(), m.end(), links[m[0]]) for m in pat.finditer(text)]
+
+
+def spans_in_text(text: str, resolved: dict[str, int] | None = None, links: dict[str, int] | None = None,
+                  not_names=()) -> list[tuple[int, int, int]]:
+    """@mentions, and group and people names written as plain text, in order, not overlapping.
+    `resolved`: who the entry's ambiguous given names are (see names_in_text); `links`: words you
+    linked by hand (they come first); `not_names`: words that aren't a name in this entry (nor
+    those in never_names()); an @mention always counts."""
     out, taken = [], []
-    for st, en, i in sorted(at_mentions(text) + groups_in_text(text) + names_in_text(text), key=lambda s: (s[0], -s[1])):
+    skip = set(not_names) | never_names()
+    by_place = lambda spans: sorted(spans, key=lambda s: (s[0], -s[1]))
+    rest = [s for s in groups_in_text(text) + names_in_text(text, resolved) if text[s[0]:s[1]] not in skip]
+    # Hand links win over @mentions, which win over the rest; within each, the longest at a place.
+    for st, en, i in by_place(linked_in_text(text, links or {})) + by_place(at_mentions(text)) + by_place(rest):
         if not any(st < e and en > s for s, e in taken):
             out.append((st, en, i))
             taken.append((st, en))
-    return out
+    return sorted(out)
 
 
 def groups_in_text(text: str) -> list[tuple[int, int, int]]:
@@ -185,6 +242,7 @@ def hue(name: str) -> int:
 # Each person with their organizations; filtered by name, kind and organization.
 LIST_SQL = """
 select p.id, p.name, p.about, p.kind, p.aliases, p.birth_year, p.birth_month, p.birth_day, p.keep_in_touch_days,
+       p.school, p.major, p.class_of,
        p.contact, ph.sha256 as photo, count(m.raw_id) as mentions,
        max(r.occurred_at) filter (where not m.named_only) as last_seen,
        coalesce((select json_agg(json_build_object('id', g.id, 'name', g.name) order by g.name)
@@ -202,6 +260,31 @@ where (%(q)s = '' or p.name ilike '%%' || %(q)s || '%%' or array_to_string(p.ali
 group by p.id, ph.sha256
 order by max(r.occurred_at) desc nulls last, p.name
 """
+
+
+# --- Standard details: school, major, 학번 --------------------------------------------------------
+
+# Ways a school gets written → the one name used here.
+SCHOOL_NAMES = {"서울대학교": "서울대", "SNU": "서울대", "고려대학교": "고려대", "연세대학교": "연세대", "KAIST": "카이스트",
+                "성균관대학교": "성균관대", "서강대학교": "서강대", "한양대학교": "한양대", "한국예술종합학교": "한예종"}
+
+
+def detail_options(conn) -> dict:
+    """Schools and majors already in use, most common first: the choices offered when editing, so the
+    same school or major is always written the same way."""
+    q = lambda col: [r["v"] for r in conn.execute(
+        f"select {col} as v from people where {col} is not null group by 1 order by count(*) desc, 1")]
+    return {"schools": q("school"), "majors": q("major")}
+
+
+def standard_detail(value: str, known: list[str], aliases: dict[str, str] | None = None) -> str | None:
+    """A school or major as it's already written here: same name ignoring spaces and case, or a known alias."""
+    v = nfc(value.strip())
+    if not v:
+        return None
+    v = (aliases or {}).get(v, v)
+    key = lambda x: re.sub(r"\s+", "", x).lower()
+    return next((k for k in known if key(k) == key(v)), v)
 
 
 def create(name: str, kind: str = "person", about: str = "") -> dict:
@@ -229,16 +312,19 @@ left join raw_entries r on r.id = m.raw_id
 where (%(q)s = '' or p.name ilike '%%' || %(q)s || '%%' or array_to_string(p.aliases, ' ') ilike '%%' || %(q)s || '%%')
   and p.id <> all(%(exclude)s)
   and (%(kind)s = '' or p.kind = %(kind)s)
+  and not (%(not_me)s and p.id is not distinct from (select (value ->> 'person_id')::bigint from settings where key = 'me'))
 group by p.id, ph.sha256
 order by p.name = %(q)s desc, max(r.occurred_at) desc nulls last, p.name
 limit 8
 """
 
 
-def suggest(q: str, exclude=(), kind: str = "") -> list[dict]:
-    """People for the picker: name/nickname matches, most recently seen first (all recent ones for q = "")."""
+def suggest(q: str, exclude=(), kind: str = "", not_me: bool = False) -> list[dict]:
+    """People for the picker: name/nickname matches, most recently seen first (all recent ones for q = "").
+    `not_me`: leave you out (you're never tagged in your own entries)."""
     with db.connect() as conn:
-        return conn.execute(SUGGEST_SQL, {"q": nfc(q), "exclude": list(exclude), "kind": kind}).fetchall()
+        return conn.execute(SUGGEST_SQL, {"q": nfc(q), "exclude": list(exclude), "kind": kind,
+                                          "not_me": not_me}).fetchall()
 
 
 ORGS_SQL = """
@@ -298,11 +384,33 @@ def person_orgs(person_id: int) -> list[dict]:
         return conn.execute(PERSON_ORGS_SQL, {"id": person_id}).fetchall()
 
 
-def join_org(person_id: int, group_id: int) -> None:
+def request_regroup() -> None:
+    """Groups or their members changed: the worker re-labels every day's groups (journal.auto_groups)
+    within seconds, so past days follow too."""
     with db.connect() as conn:
-        conn.execute("insert into memberships (person_id, group_id) select %s, id from people "
-                     "where id = %s and kind = 'group' and id <> %s on conflict do nothing",
-                     (person_id, group_id, person_id))
+        conn.execute("insert into settings (key, value) values ('groups_dirty', 'true') on conflict (key) do nothing")
+
+
+def take_regroup_request() -> bool:
+    with db.connect() as conn:
+        return conn.execute("delete from settings where key = 'groups_dirty' returning key").fetchone() is not None
+
+
+# A group and every group it's inside (GH-19 → GH).
+UP_SQL = """
+with recursive up(id) as (
+    select %(g)s::bigint union select g.parent_id from people g join up on g.id = up.id where g.parent_id is not null
+)
+"""
+
+
+def join_org(person_id: int, group_id: int) -> None:
+    """Add someone to a group, and so to every group it's inside (in GH-19 → in GH)."""
+    with db.connect() as conn:
+        conn.execute(UP_SQL + "insert into memberships (person_id, group_id) select %(p)s, g.id from people g "
+                     "where g.id in (select id from up) and g.kind = 'group' and g.id <> %(p)s on conflict do nothing",
+                     {"g": group_id, "p": person_id})
+    request_regroup()
 
 
 def add_me(conn, group_ids: list[int] | None = None) -> None:
@@ -316,6 +424,7 @@ def add_me(conn, group_ids: list[int] | None = None) -> None:
 def leave_org(person_id: int, group_id: int) -> None:
     with db.connect() as conn:
         conn.execute("delete from memberships where person_id = %s and group_id = %s", (person_id, group_id))
+    request_regroup()
 
 
 # Photos in entries that mention them, and photos their face is tagged in.
@@ -397,9 +506,33 @@ def gallery(person_id: int) -> list[dict]:
     return [r for r in rows if not (r["id"] in seen or seen.add(r["id"]))]
 
 
+def _who(p: dict) -> str:
+    return " · ".join(x for x in (p["school"], p["major"], f"{p['class_of']:02d}학번" if p["class_of"] is not None else None) if x)
+
+
+def _spans_for(entry: dict, ambiguous: dict[str, list[int]], cands: dict[int, dict]):
+    """`spans_in_text` for one entry, with its ambiguous names as "Who is 민준?" pickers (media._plain)."""
+    meta = entry["meta"]
+    names, links, not_names = meta.get("names") or {}, meta.get("hand_links") or {}, meta.get("not_names") or []
+
+    def spans(text: str) -> list:
+        # Names found in plain text (and words you linked) carry a menu to undo them.
+        out = [(st, en, i if text[st] == "@" else {"raw": entry["id"], "id": i, "text": text[st:en],
+                                                     "hand": text[st:en] in links})
+               for st, en, i in spans_in_text(text, links=links, not_names=not_names)]
+        for st, en, n in ambiguous_in_text(text, links, not_names):
+            pick = names.get(n)
+            out.append((st, en, {"raw": entry["id"], "name": n, "pick": pick["id"] if pick else None,
+                                 "how": pick["how"] if pick else None,
+                                 "cands": [{"id": i, "name": cands[i]["name"], "sub": _who(cands[i])}
+                                           for i in ambiguous.get(n, []) if i in cands]}))
+        return sorted(out, key=lambda s: s[0])
+    return spans
+
+
 def render_entries(entries: list[dict]) -> None:
     """Sets entry["html"]: the body (frontmatter dropped) with images and [[links]] resolved."""
-    from .obsidian import split_frontmatter
+    from .notetext import split_frontmatter
 
     if not entries:
         return
@@ -412,13 +545,18 @@ def render_entries(entries: list[dict]) -> None:
                 "where rm.raw_id = any(%s) order by rm.pos", ([e["id"] for e in entries],))
             q_notes = conn.execute(
                 "select id, meta ->> 'title' as title from raw_entries "
-                "where source = 'obsidian' and meta ->> 'title' = any(%s)", (titles,))
+                "where kind = 'note' and meta ->> 'title' = any(%s)", (titles,))
             q_picked = conn.execute(
                 "select m.raw_id, p.id, p.name from mentions m join people p on p.id = m.person_id "
                 "where m.raw_id = any(%s) and m.picked", ([e["id"] for e in entries],))
         images = q_img.fetchall()
         notes = {r["title"]: r["id"] for r in q_notes.fetchall()}
         picked = q_picked.fetchall()
+        # Ambiguous given names ("민준"): everyone it could be, for the "Who is 민준?" picker.
+        ambiguous = person_name_directory()[2]
+        cand_ids = sorted({i for ids in ambiguous.values() for i in ids})
+        cands = {r["id"]: r for r in conn.execute(
+            "select id, name, school, major, class_of from people where id = any(%s)", (cand_ids,))} if cand_ids else {}
     names = directory()
     for e in entries:
         # [[Name]] is the person picked for this entry when several share the name.
@@ -426,7 +564,7 @@ def render_entries(entries: list[dict]) -> None:
         mine = [i for i in images if i["raw_id"] == e["id"]]
         by_name = {i["name"]: i["sha256"] for i in mine if i["name"]}
         body = split_frontmatter(e["body"])[1].strip()
-        html = media.render_markdown(body, by_name, people, notes, spans_in_text)
+        html = media.render_markdown(body, by_name, people, notes, _spans_for(e, ambiguous, cands))
         # Photos attached in the app (no embed in the text) go after the text.
         extra = [i["sha256"] for i in mine if not i["name"] or i["name"] not in body]
         e["html"], e["extra_photos"] = html, extra
@@ -516,11 +654,29 @@ def create_subgroup(parent_id: int, name: str) -> dict:
     return g
 
 
+# Everyone in a group (or its subgroups) joins the group it was put in and every group above that.
+MOVE_MEMBERS_UP_SQL = """
+with recursive below(id) as (
+    select %(g)s::bigint union select c.id from people c join below b on c.parent_id = b.id
+), up(id) as (
+    select %(p)s::bigint union select g.parent_id from people g join up on g.id = up.id where g.parent_id is not null
+)
+insert into memberships (person_id, group_id)
+select distinct ms.person_id, up.id from memberships ms cross join up
+where ms.group_id in (select id from below) and ms.person_id <> up.id
+on conflict do nothing
+"""
+
+
 def set_parent(group_id: int, parent_id: int | None) -> None:
-    """Put a group under another (not under itself or one of its own subgroups)."""
+    """Put a group under another (not under itself or one of its own subgroups); its members join it."""
     with db.connect() as conn:
         if parent_id is not None:
             below = {r["id"] for r in conn.execute(TREE_SQL + "select id from tree", {"g": group_id})}
             if parent_id in below:
                 raise ValueError("a group can't be inside its own subgroup")
         conn.execute("update people set parent_id = %s where id = %s and kind = 'group'", (parent_id, group_id))
+        if parent_id is not None:
+            # Its members (and its subgroups') join the outer group and everything above it.
+            conn.execute(MOVE_MEMBERS_UP_SQL, {"g": group_id, "p": parent_id})
+    request_regroup()

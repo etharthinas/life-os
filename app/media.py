@@ -1,8 +1,9 @@
 """Images: ingest (dedupe by hash, EXIF-rotated web-size copies) and rendering note bodies with
-Obsidian embeds/links as HTML."""
+![[embeds]] and [[links]] as HTML."""
 
 import hashlib
 import io
+import json
 import re
 from datetime import datetime
 
@@ -80,15 +81,55 @@ def _plain(text: str, groups) -> Markup:
     out, last = [], 0
     for start, end, gid in groups(text):
         out.append(escape(text[last:start]))
-        cls = "mention" if text[start] == "@" else "grp"
-        out.append(Markup('<a class="{}" href="/people/{}">{}</a>').format(cls, gid, text[start:end]))
+        if isinstance(gid, dict) and "cands" in gid:  # a name several people share: who, and who else
+            out.append(_who_is(text[start:end], gid))
+        elif isinstance(gid, dict):  # a name found in the text, or a word you linked: with a way to undo it
+            out.append(_linked(text[start:end], gid))
+        else:
+            cls = "mention" if text[start] == "@" else "grp"
+            out.append(Markup('<a class="{}" href="/people/{}">{}</a>').format(cls, gid, text[start:end]))
         last = end
     out.append(escape(text[last:]))
     return Markup("").join(out)
 
 
+def _undo(raw: int, text: str, hand: bool) -> Markup:
+    """The "it's not a name" buttons of a name's menu."""
+    vals = Markup(escape(json.dumps({"text": text}, ensure_ascii=False)))
+    out = Markup('<button type="button" class="undo" hx-post="/entries/{}/unlink" hx-vals=\'{}\'>{}</button>').format(
+        raw, vals, "Unlink" if hand else "Not a name here")
+    if not hand:
+        out += Markup('<button type="button" class="undo" hx-post="/entries/{}/never" hx-vals=\'{}\' '
+                      'hx-confirm="Never treat “{}” as a name, in any entry?">Never a name</button>').format(raw, vals, text)
+    return out
+
+
+def _linked(label: str, info: dict) -> Markup:
+    """A name found in the text (or linked by you): a link, and on hover or tap a menu to undo it."""
+    return Markup('<span class="who-is linked" tabindex="0"><a class="grp" href="/people/{}">{}</a>'
+                  '<span class="who-pick" role="menu"><span class="q">{}</span>{}</span></span>').format(
+        info["id"], label, "Linked by you" if info["hand"] else "Found in the text", _undo(info["raw"], info["text"], info["hand"]))
+
+
+def _who_is(label: str, amb: dict) -> Markup:
+    """An ambiguous given name ("민준"): a link to whoever it was worked out to be (dotted: a guess) or
+    a "?" mark, with a picker that opens on hover or tap."""
+    pick = next((c for c in amb["cands"] if c["id"] == amb["pick"]), None)
+    shown = (Markup('<a href="/people/{}">{}</a>').format(pick["id"], label) if pick
+             else Markup('<span>{}</span>').format(label))
+    opts = Markup("").join(
+        Markup('<button type="button" class="{}" hx-post="/entries/{}/name" hx-vals=\'{}\'>{}<small>{}</small></button>').format(
+            "on" if c["id"] == amb["pick"] else "", amb["raw"],
+            Markup(escape(json.dumps({"name": amb["name"], "person_id": c["id"]}, ensure_ascii=False))), c["name"], c["sub"])
+        for c in amb["cands"])
+    state = "you" if amb["how"] == "you" else "guess" if pick else "open"
+    return Markup('<span class="who-is {}" tabindex="0">{}<span class="who-pick" role="menu">'
+                  '<span class="q">Who is {}?{}</span>{}{}</span></span>').format(
+        state, shown, amb["name"], " (guessed)" if state == "guess" else "", opts, _undo(amb["raw"], amb["name"], False))
+
+
 def render(text: str, images: dict[str, str], people: dict[str, int], notes: dict[str, int], groups=None) -> Markup:
-    """Escape `text` and turn Obsidian embeds into <img> and [[links]] into app links.
+    """Escape `text` and turn ![[embeds]] into <img> and [[links]] into app links.
 
     images: file name → sha256; people: name/alias → person id; notes: note title → raw id;
     groups: text → [(start, end, group id)] for group names written as plain text.
@@ -101,7 +142,7 @@ def render(text: str, images: dict[str, str], people: dict[str, int], notes: dic
         label = m[4] if m[4] and not m[1] else target
         if m[1]:
             if sha := images.get(target):
-                out.append(Markup('<a class="embed" href="/media/{0}/orig"><img src="/media/{0}/display" '
+                out.append(Markup('<a class="embed" href="/media/{0}/orig" hx-boost="false"><img src="/media/{0}/display" '
                                   'loading="lazy" alt="{1}"></a>').format(sha, target))
             else:
                 out.append(Markup('<span class="missing">📎 {}</span>').format(target))

@@ -200,6 +200,8 @@ No automatic payment capture (decided 2026-10-23). Data comes in through:
 - [x] Plain-text names (`people.names_in_text`): full names, nicknames, and a unique Korean given name (김민수 → "민수랑") unless it's an everyday word (`COMMON_WORDS`). Two people with the same given name: not guessed.
 - [x] **Photo tags** (`mentions.from_photo`, `journal.photo_mentions`): faces tagged in a day's photos tag the day (you excluded); 2+ of them sharing a group show under that group's 📷 label. ✕ = `meta.not_there`. Re-derived on save and after every face re-tag; never used as face evidence.
 - [x] You (`settings.me`) are a member of every group, new ones too.
-- [x] Day card: no "＋ Add" picker for the first meeting (@ in the text instead); extra meetings keep it. @ suggestions on phones: strip above the keyboard.
+- [x] Day card: each meeting has an "@ who was there" field (`static/mention.js`, adds to that meeting, keeps focus for the next name, new person if no match); @ in the text still tags the first meeting. @ suggestions on phones: strip above the keyboard.
+- [x] `/journal`: every day journal, newest first, infinite scroll. Paste images into a log/editor. Photos centred in logs.
+- [x] Person page: details card on top (phone, email, birthday, nicknames, note fields); no gift ideas; timeline shows 10, the rest behind "Show older". People list hides nicknames. Groups have no face tagging (migration 015).
 - [x] "Is this X?": only days you were with them; look-alikes of their tagged faces, then one face per look group seen 2x more around them; others' confirmed faces and yours left out. Works for you too.
 - [x] Daily template boilerplate (« [[어제]] · [[내일]] », 지난 오늘:, `## 사건`) and empty headings removed from all notes (`python -m app.journal strip`, backup taken first); the importer strips them too.

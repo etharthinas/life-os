@@ -80,7 +80,7 @@
   <article class="card daylog">
     <div id="daylog-main" class="daylog-main">
       {% if doc and doc.html %}
-        <div class="prose">{{ doc.html }}</div>
+        <div class="prose" data-raw="{{ doc.id }}">{{ doc.html }}</div>
         {% set n = doc %}{% include "_extra_photos.html" %}
       {% elif doc %}
         {% set n = doc %}{% include "_extra_photos.html" %}

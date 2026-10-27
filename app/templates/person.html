@@ -22,7 +22,7 @@
   </details>
   <div>
     <h1>{{ p.name }}</h1>
-    {% if p.about %}<p class="about">{{ p.about }}</p>{% endif %}
+    {% if p.about and p.kind == "person" %}<p class="about">{{ p.about }}</p>{% endif %}
   </div>
   {% if p.kind == "person" %}{% set pid = p.id %}{% include "_orgs.html" %}{% endif %}
   {% if p.kind == "group" %}
@@ -54,36 +54,87 @@
 </div>
 {% endif %}
 
-{# Details first: phone, birthday, nicknames, then the note's fields (학번 and so on). #}
-{% if phones or emails or p.birth_month or p.aliases or fields or p.raw_id %}
+{# Details, the same for everyone in the same order, edited right here: tap a value to change it;
+   Save appears once something changed. #}
+{% set person = p.kind == "person" %}
 <section class="section details">
-  {% if p.raw_id %}<div class="section-head"><h2>Details</h2><a class="hint" href="/notes/{{ p.raw_id }}">Original note</a></div>{% endif %}
-  {% if phones or emails or p.birth_month or p.aliases or fields %}
-  <dl class="card facts">
-    {% if phones %}<dt>Phone</dt><dd>{% for v in phones %}<a href="tel:{{ v }}" class="num">{{ v }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
-    {% if emails %}<dt>Email</dt><dd>{% for v in emails %}<a href="mailto:{{ v }}">{{ v }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
-    {% if p.birth_month %}<dt>Birthday</dt><dd class="num">{% if p.birth_year %}{{ p.birth_year }}.{% endif %}{{ "%02d" | format(p.birth_month) }}.{{ "%02d" | format(p.birth_day) }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</dd>{% endif %}
-    {% if p.aliases %}<dt>Nicknames</dt><dd>{{ p.aliases | join(", ") }}</dd>{% endif %}
-    {% for k, values in fields.items() %}<dt>{{ k }}</dt><dd>
-      {%- for v in values %}{{ v }}{% if not loop.last %}, {% endif %}{% endfor -%}
-    </dd>{% endfor %}
-  </dl>
-  {% endif %}
+  <div class="section-head"><h2>Details</h2></div>
+  <form class="card details-form" method="post" action="/people/{{ p.id }}"
+        oninput="this.classList.add('dirty')" onchange="this.classList.add('dirty')">
+    <label><span>이름</span><input name="name" value="{{ p.name }}" required></label>
+    {% if person %}
+    {# School and major offer the names already used, so they're written the same way everywhere. #}
+    <label><span>학교</span><input name="school" list="schools" autocomplete="off" placeholder="—" value="{{ p.school or '' }}"></label>
+    <label><span>전공</span><input name="major" list="majors" autocomplete="off" placeholder="—" value="{{ p.major or '' }}"></label>
+    <label><span>학번</span>
+      <select name="class_of">
+        <option value="">—</option>
+        {% for y in range(26, 4, -1) %}<option value="{{ y }}" {% if p.class_of == y %}selected{% endif %}>{{ "%02d" | format(y) }}학번</option>{% endfor %}
+        {% if p.class_of is not none and (p.class_of > 26 or p.class_of < 5) %}<option value="{{ p.class_of }}" selected>{{ "%02d" | format(p.class_of) }}학번</option>{% endif %}
+      </select></label>
+    <label><span>생일</span><input name="birthday" class="num" placeholder="— (1998-03-07, or 03-07)"
+      value="{% if p.birth_month %}{% if p.birth_year %}{{ p.birth_year }}-{% endif %}{{ '%02d' | format(p.birth_month) }}-{{ '%02d' | format(p.birth_day) }}{% endif %}"></label>
+    <label><span>전화</span><input name="phones" type="tel" class="num" placeholder="—" value="{{ phones | join(', ') }}"></label>
+    <label><span>이메일</span><input name="emails" type="email" multiple placeholder="—" value="{{ emails | join(', ') }}"></label>
+    {% endif %}
+    <label><span>별명</span><input name="aliases" placeholder="— (commas between)" value="{{ p.aliases | join(', ') }}"></label>
+    {% if person %}
+    <label><span>소개</span><input name="about" placeholder="— (고등학교 친구, 회사 동료…)" value="{{ p.about or '' }}"></label>
+    <label><span>연락 주기</span>
+      <select name="keep_in_touch_days">
+        {% for d, label in [(0, "—"), (7, "매주"), (14, "2주마다"), (30, "매달"), (60, "2달마다"), (90, "3달마다"), (180, "반년마다"), (365, "매년")] %}
+        <option value="{{ d }}" {% if (p.keep_in_touch_days or 0) == d %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select></label>
+    <datalist id="schools">{% for x in options.schools %}<option value="{{ x }}">{% endfor %}</datalist>
+    <datalist id="majors">{% for x in options.majors %}<option value="{{ x }}">{% endfor %}</datalist>
+    {% endif %}
+    <div class="details-save">
+      <button class="btn btn-quiet" type="reset" onclick="this.form.classList.remove('dirty')">Cancel</button>
+      <button class="btn btn-primary">Save</button>
+    </div>
+  </form>
 </section>
-{% endif %}
+
+<details class="more card pad">
+  <summary>More: profile photo, delete{% if person %}, “this is me”{% endif %}</summary>
+  <div class="section">
+    <form class="row" method="post" action="/people/{{ p.id }}/photo" enctype="multipart/form-data" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <label class="file-btn">Upload a profile photo <span class="picked"></span><input type="file" name="photo" accept="image/*" hidden onchange="this.form.requestSubmit()"></label>
+      {% if p.photo_id %}<button class="btn-quiet" name="media_id" value="">Remove photo</button>{% endif %}
+    </form>
+    {% if photos %}<p class="hint">Or open any of their photos below and choose “Use as profile photo”.</p>{% endif %}
+    <details class="danger-zone" id="delete">
+      <summary class="btn-quiet">Delete {{ p.name }}…</summary>
+      <form method="post" action="/people/{{ p.id }}/delete" class="danger-confirm">
+        <p class="hint">Removes {{ p.name }} from People, with their face tags{% if p.kind == "group" %} and memberships{% else %}, organizations{% endif %} and links to entries. Your journal text and photos stay.</p>
+        <button class="btn btn-danger">Delete permanently</button>
+      </form>
+    </details>
+    {% if p.kind == "person" %}
+    <form class="row" method="post" action="/people/{{ p.id }}/me" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span class="hint">{% if is_me %}This is you: your face in photos is tagged as {{ p.name }}.{% else %}Is this you? Your face (in most photos) will be tagged as {{ p.name }}.{% endif %}</span>
+      <button class="btn{% if not is_me %} btn-primary{% endif %}" name="on" value="{{ '0' if is_me else '1' }}">{{ "Not me" if is_me else "This is me" }}</button>
+    </form>
+    {% endif %}
+  </div>
+</details>
 
 <ul class="card stats">
-  <li class="{% if p.overdue %}late{% endif %}"><b>{{ ago(p.days_since) }}</b><span>last seen</span></li>
+  {% if p.kind == "person" %}<li class="{% if p.overdue %}late{% endif %}"><b>{{ ago(p.days_since) }}</b><span>last seen</span></li>{% endif %}
   <li><b>{{ p.mentions }}</b><span>entries</span></li>
+  {% if p.kind == "group" %}<li><b>{{ members | length }}</b><span>members</span></li>{% endif %}
   {% if p.birthday %}<li class="bday"><b>{{ when(p.birthday_in) }}</b><span>{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></li>{% endif %}
   {% if p.keep_in_touch_days %}<li><b>{{ p.keep_in_touch_days }}d</b><span>catch-up goal</span></li>{% endif %}
 </ul>
 {% if saved %}<p class="notice">Saved.</p>{% endif %}
 
+{% if p.kind == "person" %}
 <form class="composer" method="post" action="/people/{{ p.id }}/log" enctype="multipart/form-data">
   <textarea id="person-log" name="body" rows="2" placeholder="Saw {{ p.name }}? Write what happened."></textarea>
   <div class="actions">{{ photo_picker() }}<button class="btn btn-primary">Save</button></div>
 </form>
+{% endif %}
 
 
 {% if p.kind == "group" %}
@@ -150,40 +201,4 @@
   {% endif %}
 </section>
 
-<details class="more card pad">
-  <summary>Edit details</summary>
-  <div class="section">
-    <form class="form-grid" method="post" action="/people/{{ p.id }}">
-      <label for="f-name">Name<input id="f-name" name="name" value="{{ p.name }}" required></label>
-      <label for="f-about">About<input id="f-about" name="about" placeholder="e.g. 고등학교 친구, 회사 동료" value="{{ p.about or '' }}"></label>
-      <label for="f-bday">Birthday<input id="f-bday" name="birthday" placeholder="1998-03-07, or 03-07 without the year" value="{% if p.birth_month %}{% if p.birth_year %}{{ p.birth_year }}-{% endif %}{{ '%02d' | format(p.birth_month) }}-{{ '%02d' | format(p.birth_day) }}{% endif %}"></label>
-      <label for="f-aliases">Nicknames<input id="f-aliases" name="aliases" placeholder="Separate with commas" value="{{ p.aliases | join(', ') }}"></label>
-      <label for="f-kit">Catch up every
-        <select id="f-kit" name="keep_in_touch_days">
-          {% for d, label in [(0, "No goal"), (7, "Week"), (14, "2 weeks"), (30, "Month"), (60, "2 months"), (90, "3 months"), (180, "6 months"), (365, "Year")] %}
-          <option value="{{ d }}" {% if (p.keep_in_touch_days or 0) == d %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select></label>
-      <div class="row"><button class="btn btn-primary">Save</button></div>
-    </form>
-    <form class="row" method="post" action="/people/{{ p.id }}/photo" enctype="multipart/form-data" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <label class="file-btn">Upload a profile photo <span class="picked"></span><input type="file" name="photo" accept="image/*" hidden onchange="this.form.requestSubmit()"></label>
-      {% if p.photo_id %}<button class="btn-quiet" name="media_id" value="">Remove photo</button>{% endif %}
-    </form>
-    {% if photos %}<p class="hint">Or open any photo above and choose “Use as profile photo”.</p>{% endif %}
-    <details class="danger-zone" id="delete">
-      <summary class="btn-quiet">Delete {{ p.name }}…</summary>
-      <form method="post" action="/people/{{ p.id }}/delete" class="danger-confirm">
-        <p class="hint">Removes {{ p.name }} from People, with their face tags{% if p.kind == "group" %} and memberships{% else %}, organizations{% endif %} and links to entries. Your journal text and photos stay.{% if p.raw_id %} They come from an Obsidian note, so a re-import would bring them back unless the note is deleted too.{% endif %}</p>
-        <button class="btn btn-danger">Delete permanently</button>
-      </form>
-    </details>
-    {% if p.kind == "person" %}
-    <form class="row" method="post" action="/people/{{ p.id }}/me" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <span class="hint">{% if is_me %}This is you: your face in photos is tagged as {{ p.name }}.{% else %}Is this you? Your face (in most photos) will be tagged as {{ p.name }}.{% endif %}</span>
-      <button class="btn{% if not is_me %} btn-primary{% endif %}" name="on" value="{{ '0' if is_me else '1' }}">{{ "Not me" if is_me else "This is me" }}</button>
-    </form>
-    {% endif %}
-  </div>
-</details>
 {% endblock %}

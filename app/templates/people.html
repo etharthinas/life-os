@@ -8,11 +8,12 @@
   <a class="btn" href="/people/graph">Graph</a>
   <a class="btn" href="/people/contacts">Contacts</a>
   <a class="btn" href="/faces">Faces</a>
+  <a class="btn" href="/people/ambiguous">Ambiguous names</a>
   <details class="pop">
     <summary class="btn btn-primary">＋ New</summary>
     <form class="pop-body" method="post" action="/people">
       <input id="new-person" name="name" placeholder="Name" required autocomplete="off">
-      <input name="about" placeholder="About (optional): 고등학교 친구…" autocomplete="off">
+      <input name="about" class="if-person" placeholder="About (optional): 고등학교 친구…" autocomplete="off">
       <div class="chips">
         <label><input type="radio" name="kind" value="person" checked><span>Person</span></label>
         <label><input type="radio" name="kind" value="group"><span>Group</span></label>
@@ -23,7 +24,7 @@
   </span>
 </header>
 
-<form class="search-bar" action="/people" hx-get="/people" hx-trigger="input changed delay:250ms from:input[type=search], change from:input[type=radio], change from:select, submit" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-push-url="true">
+<form id="people-filters" class="search-bar" action="/people" hx-get="/people" hx-trigger="input changed delay:250ms from:#people-filters input[type=search], change from:#people-filters input[type=radio], change from:#people-filters select, submit" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-push-url="true">
   <div class="search-field">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
     <input id="people-q" type="search" name="q" value="{{ q }}" placeholder="Search names and nicknames" autocomplete="off">
@@ -101,7 +102,7 @@
       {{ avatar(p) }}
       <span class="who">
         <span class="name">{{ p.name }}{% if p.kind == "group" %}<span class="badge">group</span>{% endif %}</span>
-        {% if p.about %}<span class="aka">{{ p.about }}</span>{% endif %}
+        {% if p.kind == "person" and (p.school or p.major or p.class_of is not none) %}<span class="aka">{{ [p.school, p.major, ("%02d학번" | format(p.class_of)) if p.class_of is not none else None] | select | join(" · ") }}</span>{% elif p.about %}<span class="aka">{{ p.about }}</span>{% endif %}
         {% if p.orgs %}<span class="org-tags">{% for g in p.orgs[:3] %}<span class="org" style="--h: {{ hue(g.name) }}">{{ g.name }}</span>{% endfor %}{% if p.orgs | length > 3 %}<span class="more">+{{ p.orgs | length - 3 }}</span>{% endif %}</span>{% endif %}
         {% if p.kind == "group" and p.members %}<span class="aka">{{ p.members }} members</span>{% endif %}
       </span>

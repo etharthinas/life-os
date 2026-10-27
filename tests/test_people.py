@@ -64,12 +64,21 @@ def test_at_mentions_and_groups_in_text(monkeypatch):
     assert people.spans_in_text("GH-19랑, GHz") == [(0, 5, 9)]
 
 
-def test_photo_groups():
-    from app.journal import photo_groups
+def test_best_groups():
+    from app.journal import best_groups
 
     members = {10: {1, 2, 3, 9}, 11: {1, 2}, 12: {4, 5}, 13: {6}}
     size = {10: 4, 11: 2, 12: 2, 13: 1}
-    # 1 and 2 are in both 10 and 11: the smaller group wins the tie; one person alone is no group.
-    assert photo_groups({1, 2, 4, 5, 6}, members, size) == {11: {1, 2}, 12: {4, 5}}
-    assert photo_groups({1, 2, 3}, members, size) == {10: {1, 2, 3}}
-    assert photo_groups({1}, members, size) == {}
+    # 1 and 2 are in both 10 and 11: the smaller group explains them; one person alone is no group.
+    assert best_groups({1, 2, 4, 5, 6}, members, size) == {11: {1, 2}, 12: {4, 5}}
+    assert best_groups({1, 2, 3}, members, size) == {10: {1, 2, 3}}
+    assert best_groups({1}, members, size) == {}
+
+
+def test_guess():
+    from app.journal import guess
+
+    assert guess({1: 103, 2: 4}) == 1      # already there that day
+    assert guess({1: 6, 2: 3}) == 1        # twice as close to the people around
+    assert guess({1: 5, 2: 4}) is None     # too close to call
+    assert guess({1: 0, 2: 0}) is None     # nothing to go on

@@ -3,12 +3,15 @@
 {% block title %}Search · life-os{% endblock %}
 {% block content %}
 <header class="page-head"><h1>Search</h1></header>
-<form class="search-bar" action="/search">
+<form class="search-bar" action="/search" onsubmit="event.preventDefault()">
   <div class="search-field">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
-    <input id="search-q" type="search" name="q" value="{{ q }}" placeholder="Search notes, journal and people" autocomplete="off" {% if not q %}autofocus{% endif %}>
+    <input id="search-q" type="search" name="q" value="{{ q }}" placeholder="Search notes, journal and people" autocomplete="off"
+           hx-get="/search" hx-trigger="input changed delay:200ms, search" hx-target="#search-results" hx-select="#search-results"
+           hx-swap="outerHTML" hx-replace-url="true" hx-sync="this:replace" {% if not q %}autofocus{% endif %}>
   </div>
 </form>
+<div id="search-results">
 {% if q and q | length < 2 %}<p class="empty">Type at least 2 characters.</p>{% endif %}
 {% if found_people %}
 <section class="section">
@@ -31,4 +34,5 @@
 {% elif q | length >= 2 and not found_people %}
 <p class="empty">Nothing matches “{{ q }}”.</p>
 {% endif %}
+</div>
 {% endblock %}

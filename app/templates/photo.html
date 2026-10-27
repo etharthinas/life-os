@@ -12,7 +12,7 @@
 </div>
 <figure class="photo">
   <div class="photo-frame">
-    <a href="/media/{{ ph.sha256 }}/orig"><img src="/media/{{ ph.sha256 }}/display" alt=""></a>
+    <a href="/media/{{ ph.sha256 }}/orig" hx-boost="false"><img src="/media/{{ ph.sha256 }}/display" alt=""></a>
     {% for f in faces %}<a class="face-box{% if not f.person_id %} unknown{% endif %}" href="#face-{{ f.id }}" style="left: {{ f.x * 100 }}%; top: {{ f.y * 100 }}%; width: {{ f.w * 100 }}%; height: {{ f.h * 100 }}%">{% if f.name %}<span>{{ f.name }}</span>{% endif %}</a>{% endfor %}
   </div>
   <figcaption>

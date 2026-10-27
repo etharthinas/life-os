@@ -101,6 +101,23 @@ def request_relabel() -> None:
         conn.execute("insert into settings (key, value) values ('faces_dirty', 'true') on conflict (key) do nothing")
 
 
+def request_scan() -> None:
+    """Ask the worker to look for faces in new photos now (instead of on its 10-minute round)."""
+    with db.connect() as conn:
+        conn.execute("insert into settings (key, value) values ('faces_scan', 'true') on conflict (key) do nothing")
+
+
+def scan_requested() -> bool:
+    """A scan was asked for and isn't finished (the worker clears it once photos are re-tagged)."""
+    with db.connect() as conn:
+        return conn.execute("select 1 from settings where key in ('faces_scan', 'faces_dirty')").fetchone() is not None
+
+
+def finish_scan_request() -> None:
+    with db.connect() as conn:
+        conn.execute("delete from settings where key = 'faces_scan'")
+
+
 def take_relabel_request() -> bool:
     with db.connect() as conn:
         return conn.execute("delete from settings where key = 'faces_dirty' returning key").fetchone() is not None

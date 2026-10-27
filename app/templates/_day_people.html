@@ -2,12 +2,12 @@
    "@ who was there" field (static/mention.js); people also come from @mentions in the text (first
    meeting) and from faces in the day's photos (📷); people only named in the text are listed
    apart as "Mentioned"; a group brings its members along under one
-   chip, and people seen together in the photos who share a group are shown under it. #}
+   chip, and people there who share a group are shown under it (`journal.auto_groups`). #}
 {% from "_avatar.html" import avatar %}
 {% set many = day_people | length > 1 %}
 <div id="day-people" class="day-people{% if many %} many{% endif %}">
   {% for mt in day_people %}
-  <div class="meeting">
+  <div class="meeting" data-meeting="{{ mt.n }}">
     {% if many %}
     <div class="meeting-head">
       <input class="meeting-title" name="title" value="{{ mt.title }}" placeholder="Meeting {{ mt.n + 1 }}" aria-label="Meeting name"
@@ -18,16 +18,16 @@
     <ul class="chips-people">
       {% for m in mt.people %}
       {% if m.kind == "group" %}
-      <li class="group-chip{% if m.from_photo %} from-photo{% endif %}" style="--h: {{ hue(m.name) }}">
+      <li class="group-chip{% if m.auto_group %} auto{% endif %}" style="--h: {{ hue(m.name) }}">
         <details>
-          <summary><span class="org"{% if m.from_photo %} title="Seen together in this day's photos"{% endif %}>{% if m.from_photo %}<i class="cam" aria-label="From photos">📷</i>{% endif %}{{ m.name }}<b>{{ m.members | length }}</b></span></summary>
+          <summary><span class="org"{% if m.auto_group %} title="{{ 'Grouped by you (묶기)' if m.picked else 'Grouped automatically: they’re all in ' ~ m.name }}"{% endif %}>{{ m.name }}<b>{{ m.members | length }}</b></span></summary>
           <div class="group-members">
-            {% if m.from_photo %}<p class="hint">In this day's photos. ✕ on the group keeps the people, without the label.</p>{% endif %}
+            {% if m.auto_group %}<p class="hint">{{ "Grouped by you" if m.picked else "Grouped automatically" }}. ✕ on the group keeps the people, without the label.</p>{% endif %}
             <a class="hint" href="/people/{{ m.id }}">{{ m.name }} directory →</a>
             <ul>
               {% for x in m.members %}
-              <li><a href="/people/{{ x.id }}">{{ avatar(x, "sm") }}<span>{{ x.name }}</span></a>
-                <button class="unpick" title="{{ 'Not there' if x.from_photo else 'Not there: the others stay, tagged one by one' }}" aria-label="Remove {{ x.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ x.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button></li>
+              <li data-pid="{{ x.id }}"><a href="/people/{{ x.id }}">{{ avatar(x, "sm") }}<span>{{ x.name }}</span></a>
+                <button class="unpick" title="Not there (the rest of {{ m.name }} stays)" aria-label="Remove {{ x.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ x.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button></li>
               {% else %}<li class="hint">No members yet.</li>{% endfor %}
             </ul>
           </div>
@@ -35,9 +35,9 @@
         <button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
       </li>
       {% else %}
-      <li class="{% if m.picked or m.from_photo %}picked{% endif %}{% if m.from_photo %} from-photo{% endif %}">
+      <li class="picked{% if m.from_photo %} from-photo{% endif %}" data-pid="{{ m.id }}">
         <a href="/people/{{ m.id }}" title="{{ 'In this day\'s photos' if m.from_photo else (m.about or '') }}">{{ avatar(m, "sm") }}<span>{{ m.name }}</span>{% if m.from_photo %}<i class="cam" aria-label="From photos">📷</i>{% endif %}</a>
-        {% if m.picked or m.from_photo %}<button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>{% endif %}
+        <button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
       </li>
       {% endif %}
       {% endfor %}
@@ -45,11 +45,31 @@
     <input class="meet-input" type="text" autocomplete="off" autocapitalize="off" enterkeyhint="done"
            data-day="{{ day.isoformat() }}" data-meeting="{{ mt.n }}" aria-label="Add who was there{% if many %} ({{ mt.title or 'meeting ' ~ (mt.n + 1) }}){% endif %}"
            placeholder="{{ '@ who was there' if not mt.people else '@ add someone' }}">
+    {# 묶기: tap people, then the group they're under (see base.html). #}
+    <div class="label-tools">
+      <button type="button" class="btn-quiet label-toggle">묶기</button>
+      <span class="label-hint hint">Tap the people to group</span>
+      <div class="label-opts"></div>
+    </div>
     {% if mt.mentioned %}
-    <p class="mentioned" title="Named in the text ([[links]], group names), not people you were with. Write @name for that.">
-      <span>Mentioned</span>{% for x in mt.mentioned %}<a href="/people/{{ x.id }}">{{ x.name }}</a>{% endfor %}</p>
+    {# Named in the text but not tagged as there: tap one to say they were (same as @ in the field). #}
+    <p class="mentioned">
+      <span>Mentioned</span>{% for x in mt.mentioned %}<button type="button" title="They were there: add to {{ 'this meeting' if many else 'the day' }}"
+        hx-post="/day/{{ day.isoformat() }}/people?meeting={{ mt.n }}" hx-vals='{"person_id": {{ x.id }}}'
+        hx-target="#day-people" hx-swap="outerHTML">＋ {{ x.name }}</button>{% endfor %}</p>
     {% endif %}
   </div>
   {% endfor %}
-  <button class="btn-quiet add-meeting" hx-post="/day/{{ day.isoformat() }}/meetings" hx-target="#day-people" hx-swap="outerHTML">＋ Another meeting</button>
+  <div class="day-people-acts">
+    <button class="btn-quiet add-meeting" hx-post="/day/{{ day.isoformat() }}/meetings" hx-target="#day-people" hx-swap="outerHTML">＋ Another meeting</button>
+    {# Who's in the day's photos, now (shown only when the log has photos: see style.css). #}
+    {% if scanning %}
+    <span class="scan-status" hx-get="/day/{{ day.isoformat() }}/faces/status?n={{ poll or 0 }}" hx-trigger="load delay:2s"
+          hx-target="#day-people" hx-swap="outerHTML">Finding faces in the photos…</span>
+    {% else %}
+    <button class="btn-quiet tag-faces" hx-post="/day/{{ day.isoformat() }}/faces/tag" hx-target="#day-people" hx-swap="outerHTML">📷 Tag people from photos</button>
+    {% if scan_done == "tagged" %}<span class="hint">Done: people found in the photos are tagged (📷).</span>
+    {% elif scan_done == "timeout" %}<span class="hint">Still working on it. Check back in a minute.</span>{% endif %}
+    {% endif %}
+  </div>
 </div>

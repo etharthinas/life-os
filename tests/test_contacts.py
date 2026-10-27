@@ -21,13 +21,13 @@ def test_phone_key_ignores_format_and_country_code():
 
 
 def test_vcard_round_trip():
-    p = {"name": "박인하", "contact": {"phones": ["010-1234-5678"], "emails": ["a@b.c"]}, "fields": {},
+    p = {"name": "박인하", "contact": {"phones": ["010-1234-5678"], "emails": ["a@b.c"]},
          "birth_year": None, "birth_month": 5, "birth_day": 29, "about": "대표님"}
     (c,) = contacts.parse(contacts.vcard(p, ["IVF"]))
     assert c["name"] == "박인하" and c["phones"] == ["010-1234-5678"] and c["birthday"] == (None, 5, 29)
     assert c["org"] == "IVF" and c["note"] == "대표님"
 
 
-def test_note_phone_formats():
-    p = {"contact": {"phones": ["010-1234-5678"]}, "fields": {"Phone": ["tel:01012345678", "[010 9999 0000](tel:01099990000)"]}}
-    assert contacts.phones_of(p) == ["010-1234-5678", "010 9999 0000"]
+def test_phone_formats():
+    assert contacts.clean_phone("tel:01012345678") == "01012345678"
+    assert contacts.clean_phone("[010 9999 0000](tel:01099990000)") == "010 9999 0000"

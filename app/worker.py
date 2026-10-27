@@ -1,15 +1,16 @@
 """Background jobs. Run with `python -m app.worker`.
 
-Quick checks (re-tagging faces after a correction) run every few seconds; the rest every 10 minutes.
+Quick checks (re-tagging faces after a correction, a requested face scan, group labels after
+membership changes) run every few seconds; the rest every 10 minutes.
 """
 
 import time
 import traceback
 from datetime import datetime
 
-from . import backup, capture, config, days, db, faces, google
+from . import backup, capture, config, days, db, faces, google, journal, people
 
-TICK = 15
+TICK = 5
 SYNC_EVERY = 10 * 60
 BACKUP_HOUR = 3  # local time
 
@@ -57,8 +58,23 @@ def run() -> None:
             last_slow = time.monotonic()
             slow_jobs()
         try:
-            if faces.take_relabel_request():
+            # "Tag people from photos" (or a fresh upload): scan now, then re-tag.
+            if faces.scan_requested() and faces.available() and faces.pending():
+                n = faces.scan_in_subprocess()
+                faces.take_relabel_request()
+                print("faces: scanned", n, "photos on request;", faces.relabel(recluster=True), flush=True)
+            elif faces.take_relabel_request():
                 print("faces:", faces.relabel(), flush=True)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            faces.finish_scan_request()
+        try:
+            # A group or its members changed: every day's automatic group labels again.
+            if people.take_regroup_request():
+                with db.connect() as conn, conn.transaction():
+                    journal.auto_groups(conn)
+                print("groups: re-labelled", flush=True)
         except Exception:
             traceback.print_exc()
         time.sleep(TICK)

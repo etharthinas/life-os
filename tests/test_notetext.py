@@ -1,4 +1,4 @@
-from app.obsidian import parse_birthday, person_names, split_frontmatter, wikilinks
+from app.notetext import parse_birthday, person_names, split_frontmatter, wikilinks
 
 
 def test_frontmatter_daily():
@@ -31,7 +31,7 @@ def test_birthday_formats():
 
 
 def test_strip_template():
-    from app.obsidian import strip_template
+    from app.notetext import strip_template
 
     note = ("---\nDate: 2026-10-14\n---\n« [[2026.10.13]] · [[2026.10.15]] »\n\n지난 오늘: [[2025.10.14]] · [[2024.10.14]]\n\n"
             "## 사건\n1. 출근\n\n## 감사\n\n## 기도\n- a\n### 묵상\n\n# 생각\n")

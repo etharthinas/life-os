@@ -11,7 +11,7 @@ import re
 from datetime import date
 
 from . import db
-from .obsidian import nfc
+from .notetext import nfc
 
 # --- Parsing ----------------------------------------------------------------------------------------
 
@@ -43,7 +43,7 @@ def _birthday(v: str) -> tuple[int | None, int | None, int | None]:
 
 
 def clean_phone(p) -> str:
-    """A number as written in a note: `tel:010…`, `[010…](tel:…)` → the number itself."""
+    """A number as typed or pasted: `tel:010…`, `[010…](tel:…)` → the number itself."""
     p = str(p).strip()
     if m := re.search(r"\[([^\]]+)\]\(tel:", p):
         p = m[1]
@@ -121,7 +121,7 @@ def _merge_contact(old: dict, card: dict) -> dict:
 def import_cards(cards: list[dict]) -> dict:
     """Merge cards into matching people; the rest are kept for review. Returns counts."""
     with db.connect() as conn:
-        people = conn.execute("select id, name, aliases, kind, contact, fields, birth_month from people "
+        people = conn.execute("select id, name, aliases, kind, contact, birth_month from people "
                               "where kind = 'person'").fetchall()
     by_phone, by_name = {}, {}
     for p in people:
@@ -219,11 +219,5 @@ def all_vcards() -> str:
 
 
 def phones_of(p: dict) -> list[str]:
-    """Numbers from contacts, then the note's `Phone:` (one or a list), without duplicates."""
-    phones = list((p.get("contact") or {}).get("phones") or [])
-    f = (p.get("fields") or {}).get("Phone")
-    for x in (f if isinstance(f, list) else [f] if f else []):
-        x = clean_phone(x)
-        if phone_key(x) and phone_key(x) not in {phone_key(y) for y in phones}:
-            phones.append(x)
-    return phones
+    """Their phone numbers (the contact card)."""
+    return list((p.get("contact") or {}).get("phones") or [])

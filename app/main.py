@@ -14,9 +14,10 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
 from PIL import UnidentifiedImageError
+from psycopg.types.json import Jsonb
 
 from . import capture, config, contacts, days, db, faces, google, journal, media, people, storage
-from .obsidian import parse_birthday, split_frontmatter
+from .notetext import parse_birthday, split_frontmatter
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
@@ -226,7 +227,7 @@ def day_view(request: Request, d: str | None = None):
                    all_day=[e for e in data["events"] if e["all_day"]], timed=timed, week=week,
                    blocks=data["blocks"], day_todos=data["day_todos"], day_people=data["meetings"],
                    doc=next((e for e in data["entries"] if e["meta"].get("type") == "daily"), None),
-                   notes=[e for e in data["entries"] if e["kind"] in ("import", "note") and e["meta"].get("type") != "daily"],
+                   notes=[e for e in data["entries"] if e["kind"] == "note" and e["meta"].get("type") != "daily"],
                    connected=bool(data["calendars"]), settings=data["settings"])
 
 
@@ -347,7 +348,7 @@ def people_mention(q: str = ""):
     """For @-autocomplete while writing."""
     return [{"id": p["id"], "name": p["name"], "kind": p["kind"], "photo": p["photo"],
              "sub": p["about"] or ("Group" if p["kind"] == "group" else "")}
-            for p in people.suggest(q.strip())]
+            for p in people.suggest(q.strip(), not_me=True)]
 
 
 @app.get("/people/graph", response_class=HTMLResponse)
@@ -401,7 +402,8 @@ def people_suggest(request: Request, q: str = "", to: str = ""):
     else:
         raise HTTPException(400)
     return _render(request, "_people_suggest.html", q=q.strip(), action=action, target=target, include=include,
-                   found=people.suggest(q.strip(), exclude=taken, kind="person" if person_only else ""),
+                   found=people.suggest(q.strip(), exclude=taken, kind="person" if person_only else "",
+                                        not_me=kind == "day"),
                    exists=q.strip() in people.directory())
 
 
@@ -412,6 +414,77 @@ def day_pick_person(request: Request, d: str, person_id: int | None = Form(None)
     if person_id is None:
         person_id = people.create(name)["id"]
     journal.pick_person(day, person_id, meeting)
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
+
+
+# Photos of the day's journal not scanned for faces yet.
+UNSCANNED_SQL = """
+select count(*) as n from raw_media rm join media m on m.id = rm.media_id
+join raw_entries r on r.id = rm.raw_id and r.meta ->> 'type' = 'daily'
+where r.occurred_at >= %s and r.occurred_at < %s and not m.faces_scanned
+"""
+
+
+@app.post("/day/{d}/faces/tag", response_class=HTMLResponse)
+def day_tag_faces(request: Request, d: str):
+    """"Tag people from photos": the worker finds the faces now; the card waits for it."""
+    day = _parse_day(d)
+    faces.request_scan()
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day), scanning=True)
+
+
+@app.get("/day/{d}/faces/status", response_class=HTMLResponse)
+def day_tag_faces_status(request: Request, d: str, n: int = 0):
+    """Polled every 2 s while faces are being found (for up to 2 minutes): the card, with who's
+    tagged once the worker is done."""
+    day = _parse_day(d)
+    with db.connect() as conn:
+        left = conn.execute(UNSCANNED_SQL, journal._bounds(day)).fetchone()["n"]
+    busy = faces.scan_requested()
+    if left and not busy:
+        faces.request_scan()  # asked for while the worker was finishing another round: ask again
+    waiting = bool(left or busy) and faces.available() and n < 60
+    return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day),
+                   scanning=waiting, poll=n + 1, scan_done="tagged" if not (left or busy) else "timeout" if not waiting else "")
+
+
+# Groups that have all of these people in them, the tightest first (묶기 suggestions).
+LABEL_OPTIONS_SQL = """
+select g.id, g.name, count(*) over () as n_found,
+       (select count(*) from memberships x where x.group_id = g.id) as size
+from people g
+where g.kind = 'group'
+  and (select count(*) from memberships ms where ms.group_id = g.id and ms.person_id = any(%(ids)s)) = cardinality(%(ids)s)
+order by size, g.name
+limit 8
+"""
+
+
+@app.get("/day/{d}/label/options", response_class=HTMLResponse)
+def day_label_options(request: Request, d: str, ids: str = "", meeting: int = 0):
+    """묶기: the groups the selected people are all in, and making a new group of them."""
+    day = _parse_day(d)
+    pids = [int(x) for x in ids.split(",") if x.isdigit()]
+    if not pids:
+        return HTMLResponse("")
+    with db.connect() as conn:
+        found = conn.execute(LABEL_OPTIONS_SQL, {"ids": pids}).fetchall()
+    return _render(request, "_label_options.html", day=day, found=found, ids=pids, meeting=meeting)
+
+
+@app.post("/day/{d}/label", response_class=HTMLResponse)
+def day_label(request: Request, d: str, meeting: int = Form(0), group_id: int | None = Form(None),
+              name: str = Form(""), ids: str = Form("")):
+    """묶기 → a group: label the meeting's people with it. A new name makes the group, with them in it."""
+    day = _parse_day(d)
+    pids = [int(x) for x in ids.split(",") if x.isdigit()]
+    if group_id is None:
+        if not name.strip():
+            raise HTTPException(400)
+        group_id = people.create(name, kind="group")["id"]
+        for pid in pids:
+            people.join_org(pid, group_id)
+    journal.label_group(day, meeting, group_id, pids)
     return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
 
 
@@ -442,23 +515,83 @@ def day_unpick_person(request: Request, d: str, person_id: int):
     return _render(request, "_day_people.html", day=day, day_people=journal.day_people(day))
 
 
+@app.post("/entries/{raw_id}/name")
+def entry_choose_name(raw_id: int, name: str = Form(...), person_id: int | None = Form(None)):
+    """"Who is 민준?" → this person (for this entry). The page reloads to show it everywhere."""
+    try:
+        journal.choose_name(raw_id, name, person_id)
+    except KeyError:
+        raise HTTPException(404)
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+@app.post("/entries/{raw_id}/link")
+def entry_link(raw_id: int, text: str = Form(...), person_id: int = Form(...)):
+    """Select a word → Link to someone: everywhere it's written in this entry."""
+    text = text.strip()
+    if not text or len(text) > 40:
+        raise HTTPException(400)
+    try:
+        journal.link_text(raw_id, text, person_id)
+    except KeyError:
+        raise HTTPException(404)
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+@app.post("/entries/{raw_id}/unlink")
+def entry_unlink(raw_id: int, text: str = Form(...)):
+    """"Not a name here" (or undo a link you made)."""
+    try:
+        journal.unlink_text(raw_id, text)
+    except KeyError:
+        raise HTTPException(404)
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+@app.post("/entries/{raw_id}/never")
+def entry_never(raw_id: int, background: BackgroundTasks, text: str = Form(...)):
+    """"Never a name": this entry at once, every other entry that has the word in the background."""
+    people.add_never_name(text)
+    try:
+        journal.unlink_text(raw_id, text)
+    except KeyError:
+        raise HTTPException(404)
+    background.add_task(journal.resync_containing, text)
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+AMBIGUOUS_SQL = """
+select id, body, occurred_at, meta, kind, source from raw_entries
+where jsonb_array_length(coalesce(meta -> 'ambiguous', '[]')) > 0
+   or exists (select 1 from jsonb_each(coalesce(meta -> 'names', '{}')) n where n.value ->> 'how' = 'guess')
+order by occurred_at desc
+"""
+
+
+@app.get("/people/ambiguous", response_class=HTMLResponse)
+def people_ambiguous(request: Request):
+    """Entries with a name several people share ("민준"): the ones nobody could tell, then the guesses."""
+    with db.connect() as conn:
+        entries = conn.execute(AMBIGUOUS_SQL).fetchall()
+    people.render_entries(entries)
+    open_ = [e for e in entries if e["meta"].get("ambiguous")]
+    guessed = [e for e in entries if not e["meta"].get("ambiguous")]
+    return _render(request, "ambiguous.html", open_=open_, guessed=guessed)
+
+
 @app.get("/people/{person_id}", response_class=HTMLResponse)
 def person(request: Request, person_id: int, saved: str = ""):
     data = people.load_person(person_id, limit=None)  # 10 shown, the rest behind "Show older"
     if not data:
         raise HTTPException(404)
     p = data["p"]
-    # Frontmatter values like "[[IVF]]" become links; render them with the same helper as note bodies.
-    fields = {k: [media.render(str(x), {}, people.directory(), {}) for x in (v if isinstance(v, list) else [v])]
-              for k, v in p["fields"].items() if v not in (None, "", []) and k not in ("Birthday", "tags")}
-    fields.pop("Associated", None)  # shown as organization tags (memberships)
-    fields.pop("Phone", None)  # shown first in the details (from the contact card)
-    fields.pop("Subgroups", None)  # shown as the group's subgroups
     me = data["me"] or {}
+    with db.connect() as conn:
+        options = people.detail_options(conn)
     if p["kind"] == "group":
         data["group"] = people.group_page(person_id)
         data["all_groups"] = [g for g in people.list_people(kind="group")["people"] if g["id"] != person_id]
-    return _render(request, "person.html", fields=fields, saved=saved, is_me=me.get("person_id") == person_id,
+    return _render(request, "person.html", options=options, saved=saved, is_me=me.get("person_id") == person_id,
                    phones=contacts.phones_of(p), emails=(p["contact"] or {}).get("emails") or [], **data)
 
 
@@ -516,13 +649,15 @@ def person_org_remove(request: Request, person_id: int, group_id: int):
 
 @app.post("/people/{person_id}")
 def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), aliases: str = Form(""),
-                birthday: str = Form(""), keep_in_touch_days: str = Form("")):
+                birthday: str = Form(""), keep_in_touch_days: str = Form(""), phones: str | None = Form(None),
+                emails: str | None = Form(None), school: str | None = Form(None), major: str | None = Form(None),
+                class_of: str | None = Form(None)):
     y, mo, d = parse_birthday(birthday)
     if birthday.strip() and mo is None:
         raise HTTPException(400, "birthday: use YYYY-MM-DD or MM-DD")
     alias_list = [a.strip() for a in aliases.split(",") if a.strip()]
     with db.connect() as conn:
-        old = conn.execute("select name from people where id = %s", (person_id,)).fetchone()
+        old = conn.execute("select name, contact from people where id = %s", (person_id,)).fetchone()
         if not old:
             raise HTTPException(404)
         name = people.nfc(name.strip()) or old["name"]
@@ -533,6 +668,20 @@ def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), ali
                      (name, about.strip() or None, alias_list, y, mo, d,
                       int(keep_in_touch_days) if keep_in_touch_days.isdigit() and int(keep_in_touch_days) else None,
                       person_id))
+        # The standard details, written the way they already are elsewhere ("고려대학교" → 고려대).
+        if school is not None or major is not None or class_of is not None:
+            known = people.detail_options(conn)
+            yy = int(class_of) % 100 if (class_of or "").strip().isdigit() else None
+            conn.execute("update people set school = %s, major = %s, class_of = %s where id = %s",
+                         (people.standard_detail(school or "", known["schools"], people.SCHOOL_NAMES),
+                          people.standard_detail(major or "", known["majors"]), yy, person_id))
+        # Phone numbers and emails live with the contact card.
+        contact = dict(old["contact"] or {})
+        if phones is not None:
+            contact["phones"] = [contacts.clean_phone(x) for x in phones.split(",") if x.strip()]
+        if emails is not None:
+            contact["emails"] = [x.strip() for x in emails.split(",") if x.strip()]
+        conn.execute("update people set contact = %s where id = %s", (Jsonb(contact), person_id))
     people.forget_directory()
     return RedirectResponse(f"/people/{person_id}?saved=1", status_code=303)
 
@@ -545,6 +694,8 @@ def _ingest_uploads(files: list[UploadFile]) -> list[int]:
                 ids.append(media.ingest(f.file.read(), None, "web"))  # named by hash when embedded
             except UnidentifiedImageError:
                 raise HTTPException(400, f"not an image: {f.filename}")
+    if ids:
+        faces.request_scan()  # who's in them: the worker looks within seconds
     return ids
 
 
@@ -703,6 +854,7 @@ def delete_person(person_id: int):
             raise HTTPException(404)
     people.forget_directory()
     faces.request_relabel()
+    people.request_regroup()
     return RedirectResponse("/people", status_code=303)
 
 

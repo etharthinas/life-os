@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}Ambiguous names · life-os{% endblock %}
+{% block content %}
+{{ back("/people", "People") }}
+<header class="page-head"><h1>Ambiguous names</h1></header>
+<p class="hint">Given names several people share (민준: 성민준 or 조민준?). Hover or tap a dotted name to say who it is;
+  your choice holds for that entry. Guesses come from who else was there and the groups they share.</p>
+{% macro entries(list) %}
+<div class="jlist">
+  {% for e in list %}
+  <article class="card daylog jentry">
+    <a class="jdate" href="{{ '/day/' ~ (e.occurred_at | local('%Y-%m-%d')) if e.meta.type == 'daily' else '/notes/' ~ e.id }}">
+      <span>{{ e.occurred_at | local("%Y.%m.%d") }}</span><span class="wd">{{ (e.meta.ambiguous or []) | join(", ") }}</span></a>
+    <div class="prose" data-raw="{{ e.id }}">{{ e.html }}</div>
+  </article>
+  {% endfor %}
+</div>
+{% endmacro %}
+<section class="section">
+  <div class="section-head"><h2>Not sure<span class="count">{{ open_ | length }}</span></h2></div>
+  {% if open_ %}{{ entries(open_) }}{% else %}<p class="empty">Nothing left to tell apart.</p>{% endif %}
+</section>
+{% if guessed %}
+<section class="section">
+  <div class="section-head"><h2>Guessed<span class="count">{{ guessed | length }}</span></h2></div>
+  {{ entries(guessed) }}
+</section>
+{% endif %}
+{% endblock %}
