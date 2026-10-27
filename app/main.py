@@ -732,6 +732,21 @@ def set_photo(person_id: int, media_id: str = Form(""), photo: UploadFile | None
     return RedirectResponse(f"/people/{person_id}", status_code=303)
 
 
+def _photo_context(conn, media_id: int) -> dict:
+    """What photo.html shows under any photo: the entries it's from and who is in them."""
+    with conn.pipeline():
+        # Who else is in the notes this photo comes from: candidates for "use as their photo".
+        q_in = conn.execute(
+            "select distinct p.id, p.name, p.photo_id, ph.sha256 as photo from raw_media rm "
+            "join mentions m on m.raw_id = rm.raw_id join people p on p.id = m.person_id "
+            "left join media ph on ph.id = p.photo_id "
+            "where rm.media_id = %s and p.kind = 'person' order by p.name", (media_id,))
+        q_notes = conn.execute(
+            "select r.id, r.occurred_at, r.meta ->> 'title' as title from raw_media rm "
+            "join raw_entries r on r.id = rm.raw_id where rm.media_id = %s order by r.occurred_at", (media_id,))
+    return {"people_in": q_in.fetchall(), "notes": q_notes.fetchall(), "faces": faces.in_photo(media_id)}
+
+
 @app.get("/people/{person_id}/photos/{media_id}", response_class=HTMLResponse)
 def person_photo(request: Request, person_id: int, media_id: int):
     photos = people.gallery(person_id)
@@ -739,20 +754,23 @@ def person_photo(request: Request, person_id: int, media_id: int):
     if i is None:
         raise HTTPException(404)
     with db.connect() as conn:
-        with conn.pipeline():
-            q_p = conn.execute("select id, name, photo_id from people where id = %s", (person_id,))
-            # Who else is in the notes this photo comes from: candidates for "use as their photo".
-            q_in = conn.execute(
-                "select distinct p.id, p.name, p.photo_id, ph.sha256 as photo from raw_media rm "
-                "join mentions m on m.raw_id = rm.raw_id join people p on p.id = m.person_id "
-                "left join media ph on ph.id = p.photo_id "
-                "where rm.media_id = %s and p.kind = 'person' order by p.name", (media_id,))
-            q_notes = conn.execute(
-                "select r.id, r.occurred_at, r.meta ->> 'title' as title from raw_media rm "
-                "join raw_entries r on r.id = rm.raw_id where rm.media_id = %s order by r.occurred_at", (media_id,))
-        return _render(request, "photo.html", p=q_p.fetchone(), ph=photos[i], n=len(photos), i=i,
+        p = conn.execute("select id, name, photo_id from people where id = %s", (person_id,)).fetchone()
+        return _render(request, "photo.html", p=p, ph=photos[i], n=len(photos), i=i,
                        prev=photos[i - 1] if i else None, next=photos[i + 1] if i + 1 < len(photos) else None,
-                       people_in=q_in.fetchall(), notes=q_notes.fetchall(), faces=faces.in_photo(media_id))
+                       **_photo_context(conn, media_id))
+
+
+@app.get("/photos/{sha}", response_class=HTMLResponse)
+def photo(request: Request, sha: str):
+    """Any photo (from a journal or a note), with its faces; back goes wherever you came from."""
+    with db.connect() as conn:
+        ph = conn.execute(
+            "select m.id, m.sha256, m.taken_at, min(r.occurred_at) as occurred_at from media m "
+            "left join raw_media rm on rm.media_id = m.id left join raw_entries r on r.id = rm.raw_id "
+            "where m.sha256 = %s group by m.id", (sha,)).fetchone()
+        if not ph:
+            raise HTTPException(404)
+        return _render(request, "photo.html", p=None, ph=ph, **_photo_context(conn, ph["id"]))
 
 
 # --- Faces ------------------------------------------------------------------------------------------

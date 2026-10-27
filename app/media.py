@@ -142,7 +142,7 @@ def render(text: str, images: dict[str, str], people: dict[str, int], notes: dic
         label = m[4] if m[4] and not m[1] else target
         if m[1]:
             if sha := images.get(target):
-                out.append(Markup('<a class="embed" href="/media/{0}/orig" hx-boost="false"><img src="/media/{0}/display" '
+                out.append(Markup('<a class="embed" href="/photos/{0}"><img src="/media/{0}/display" '
                                   'loading="lazy" alt="{1}"></a>').format(sha, target))
             else:
                 out.append(Markup('<span class="missing">📎 {}</span>').format(target))

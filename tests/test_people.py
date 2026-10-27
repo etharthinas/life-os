@@ -35,6 +35,7 @@ def test_render_links_and_embeds():
     assert '<a href="/people/1">의진</a>' in html
     assert '<a href="/notes/9">IVF</a>' in html
     assert f'src="/media/{"f" * 64}/display"' in html
+    assert f'href="/photos/{"f" * 64}"' in html
     assert "📎 gone.png" in html
     assert '<span class="link">Nowhere</span>' in html
 

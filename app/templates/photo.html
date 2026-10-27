@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% from "_avatar.html" import avatar, back %}
-{% block title %}{{ p.name }} photos · life-os{% endblock %}
+{% block title %}{{ p.name ~ " photos" if p else "Photo" }} · life-os{% endblock %}
 {% block content %}
+{% if p %}
 <div class="viewer-nav">
   {{ back("/people/" ~ p.id, p.name) }}
   <span class="pos">{{ i + 1 }} / {{ n }}</span>
@@ -10,13 +11,15 @@
     {% if next %}<a class="icon-link" href="/people/{{ p.id }}/photos/{{ next.id }}" aria-label="Older"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a>{% endif %}
   </span>
 </div>
+{% endif %}
 <figure class="photo">
   <div class="photo-frame">
-    <a href="/media/{{ ph.sha256 }}/orig" hx-boost="false"><img src="/media/{{ ph.sha256 }}/display" alt=""></a>
+    <a href="/media/{{ ph.sha256 }}/orig" target="_blank" rel="noopener" hx-boost="false"><img src="/media/{{ ph.sha256 }}/display" alt=""></a>
     {% for f in faces %}<a class="face-box{% if not f.person_id %} unknown{% endif %}" href="#face-{{ f.id }}" style="left: {{ f.x * 100 }}%; top: {{ f.y * 100 }}%; width: {{ f.w * 100 }}%; height: {{ f.h * 100 }}%">{% if f.name %}<span>{{ f.name }}</span>{% endif %}</a>{% endfor %}
   </div>
   <figcaption>
-    <a href="/day/{{ (ph.taken_at or ph.occurred_at) | local('%Y-%m-%d') }}" class="num">{{ (ph.taken_at or ph.occurred_at) | local("%Y.%m.%d") }}</a>
+    {% set at = ph.taken_at or ph.occurred_at %}
+    {% if at %}<a href="/day/{{ at | local('%Y-%m-%d') }}" class="num">{{ at | local("%Y.%m.%d") }}</a>{% endif %}
     {% for r in notes %}<a href="/notes/{{ r.id }}">{{ r.title or "Journal entry" }}</a>{% endfor %}
   </figcaption>
 </figure>
