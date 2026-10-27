@@ -30,7 +30,12 @@
       filter: ".unpick", preventOnFilter: false,
       onStart: () => { closeMenu(); clearTimeout(pressTimer); box.classList.add("chip-dragging"); },
       onEnd: () => box.classList.remove("chip-dragging"),
-      onAdd: (e) => post(box, "/move", { ids: e.item.dataset.ids, meeting: e.to.closest("[data-meeting]").dataset.meeting }),
+      onAdd: (e) => {
+        // Dropped on "새 미팅": keep it showing, with the chip in it, until the new meeting comes back.
+        const zone = e.to.closest(".new-meeting");
+        if (zone) { zone.classList.add("landing"); zone.querySelector(".hint").textContent = "새 미팅 만드는 중…"; }
+        post(box, "/move", { ids: e.item.dataset.ids, meeting: e.to.closest("[data-meeting]").dataset.meeting });
+      },
     }));
   }
   // "Mentioned" (people the text only names) goes under the meeting you're at: the one the mouse

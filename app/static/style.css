@@ -847,7 +847,7 @@ form:has(input[name=kind][value=group]:checked) .if-person { display: none; }
 /* Drop a chip past the last meeting: a new meeting (daypeople.js). */
 .new-meeting { display: none; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 10px; border: 1.5px dashed var(--accent);
   border-radius: var(--r-md); background: var(--accent-soft); }
-.chip-dragging .new-meeting { display: flex; }
+.chip-dragging .new-meeting, .new-meeting.landing { display: flex; }
 .new-meeting .chips-people { min-height: 30px; flex: 1; }
 .new-meeting .hint { color: var(--accent); font-size: var(--t-sm); white-space: nowrap; }
 
