@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar, back %}
+{% block title %}{{ p.name }} photos · life-os{% endblock %}
+{% block content %}
+<div class="viewer-nav">
+  {{ back("/people/" ~ p.id, p.name) }}
+  <span class="pos">{{ i + 1 }} / {{ n }}</span>
+  <span>
+    {% if prev %}<a class="icon-link" href="/people/{{ p.id }}/photos/{{ prev.id }}" aria-label="Newer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>{% endif %}
+    {% if next %}<a class="icon-link" href="/people/{{ p.id }}/photos/{{ next.id }}" aria-label="Older"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a>{% endif %}
+  </span>
+</div>
+<figure class="photo">
+  <div class="photo-frame">
+    <a href="/media/{{ ph.sha256 }}/orig"><img src="/media/{{ ph.sha256 }}/display" alt=""></a>
+    {% for f in faces %}<a class="face-box{% if not f.person_id %} unknown{% endif %}" href="#face-{{ f.id }}" style="left: {{ f.x * 100 }}%; top: {{ f.y * 100 }}%; width: {{ f.w * 100 }}%; height: {{ f.h * 100 }}%">{% if f.name %}<span>{{ f.name }}</span>{% endif %}</a>{% endfor %}
+  </div>
+  <figcaption>
+    <a href="/day/{{ (ph.taken_at or ph.occurred_at) | local('%Y-%m-%d') }}" class="num">{{ (ph.taken_at or ph.occurred_at) | local("%Y.%m.%d") }}</a>
+    {% for r in notes %}<a href="/notes/{{ r.id }}">{{ r.title or "Journal entry" }}</a>{% endfor %}
+  </figcaption>
+</figure>
+
+{% if faces %}
+<section class="section">
+  <div class="section-head"><h2>In this photo<span class="count">{{ faces | length }}</span></h2></div>
+  <ul class="card face-list">{% for f in faces %}{% include "_face_row.html" %}{% endfor %}</ul>
+</section>
+{% else %}
+{% if people_in %}
+<section class="section">
+  <div class="section-head"><h2>People in this entry</h2></div>
+  <ul class="card people-list">
+  {% for q in people_in %}
+    <li><a href="/people/{{ q.id }}">{{ avatar(q) }}<span class="who"><span class="name">{{ q.name }}</span></span></a>
+      <span class="actions">{% if q.photo_id == ph.id %}<span class="hint">Profile photo</span>
+      {% else %}<form method="post" action="/people/{{ q.id }}/photo"><button class="btn" name="media_id" value="{{ ph.id }}">Use as profile photo</button></form>{% endif %}</span>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

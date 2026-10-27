@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}Settings · life-os{% endblock %}
+{% block content %}
+{{ back("/", "Today") }}
+<header class="page-head"><h1>Settings</h1></header>
+
+<section class="section">
+  <div class="section-head"><h2>Google Calendar</h2></div>
+  {% set ls = s.last_sync %}
+  {% if accounts %}
+  <div class="card">
+    <ul class="settings-list">
+      <li><span>{{ accounts | join(", ") }}</span>
+        <form method="post" action="/settings/sync"><button class="btn">Sync now</button></form></li>
+      <li><span class="muted">
+        {% if ls and not ls.ok %}{% if ls.expired %}Login expired. Run <code>python -m app.google auth</code> on the Mac.{% else %}Last sync failed: {{ ls.error }}{% endif %}
+        {% elif ls %}Last synced {{ ls.at[:16] | replace("T", " ") }} · {{ ls.events }} events{% else %}Not synced yet{% endif %}
+        {% if synced %} · Synced {{ synced }} events just now{% endif %}</span></li>
+    </ul>
+  </div>
+  {% else %}
+  <p class="notice">Not connected. Run <code>python -m app.google auth</code> on a computer with a browser.</p>
+  {% endif %}
+</section>
+
+<form class="section" method="post" action="/settings" style="gap:28px">
+  {% if calendars %}
+  <section class="section">
+    <div class="section-head"><h2>Calendars</h2></div>
+    <div class="card">
+      <ul class="settings-list">
+      {% for c in calendars %}
+        <li style="--c: {{ c.color or 'var(--ink-3)' }}">
+          <label><input type="checkbox" name="synced_calendar" value="{{ c.id }}" {% if c.synced %}checked{% endif %}><span class="swatch"></span>{{ c.summary }}</label>
+          {% if c.access_role in ("owner", "writer") %}
+          <label class="side"><input type="radio" name="block_calendar_id" value="{{ c.id }}" {% if c.id == target %}checked{% endif %}> Blocks go here</label>
+          {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    </div>
+    <p class="hint">Checked calendars count as busy time when planning.</p>
+  </section>
+  {% endif %}
+
+  <section class="section">
+    <div class="section-head"><h2>Planning</h2></div>
+    <div class="card">
+      <ul class="settings-list">
+        <li><label for="s-start">Day starts</label><input id="s-start" type="time" name="day_start" value="{{ s.day_start }}"></li>
+        <li><label for="s-end">Day ends</label><input id="s-end" type="time" name="day_end" value="{{ s.day_end }}"></li>
+        <li><label for="s-est">Default estimate (min)</label><input id="s-est" type="number" name="default_estimate_min" min="5" step="5" value="{{ s.default_estimate_min }}"></li>
+      </ul>
+    </div>
+  </section>
+  <div><button class="btn btn-primary">Save settings</button></div>
+</form>
+{% endblock %}

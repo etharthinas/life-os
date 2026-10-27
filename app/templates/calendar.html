@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ first.year }}년 {{ first.month }}월 · life-os{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<header class="page-head month-head">
+  <h1><span class="num">{{ first.month }}월</span> <span class="year">{{ first.year }}</span></h1>
+  <span class="row-gap">
+    {% if not (first.year == today.year and first.month == today.month) %}<a class="today-pill" href="/calendar">Today</a>{% endif %}
+    <a class="icon-link" href="/calendar?m={{ prev.year }}-{{ prev.month }}" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>
+    <a class="icon-link" href="/calendar?m={{ next.year }}-{{ next.month }}" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a>
+  </span>
+</header>
+<div class="month">
+  <div class="month-dow">{% for w in "월화수목금토일" %}<span class="{% if loop.last %}sun{% elif loop.index == 6 %}sat{% endif %}">{{ w }}</span>{% endfor %}</div>
+  {% for week in weeks %}
+  <div class="month-week">
+    {% for d in week %}{% set c = cells[d] %}
+    <a class="mday{% if d.month != first.month %} out{% endif %}{% if d == today %} today{% endif %}{% if d.weekday() == 6 %} sun{% endif %}"
+       href="{{ '/' if d == today else '/day/' ~ d.isoformat() }}" aria-label="{{ d.month }}월 {{ d.day }}일">
+      <span class="mnum"><span>{{ d.day }}</span>{% if c.logs %}<i class="logdot" title="{{ c.logs }} entries"></i>{% endif %}</span>
+      <span class="mitems">
+        {% for b in c.birthdays %}<span class="pill bday">🎂 {{ b.name }}</span>{% endfor %}
+        {% for e in c.events %}<span class="pill{% if e.time %} timed{% endif %}" style="--c: {{ e.color or 'var(--accent)' }}">{% if e.time %}<b>{{ e.time }}</b> {% endif %}{{ e.summary or "Busy" }}</span>{% endfor %}
+        {% for t in c.todos %}<span class="pill todo{% if t.status == 'done' %} done{% endif %}">{{ "☑" if t.status == "done" else "☐" }} {{ t.title }}</span>{% endfor %}
+      </span>
+      {% set n = c.birthdays | length + c.events | length + c.todos | length %}
+      {% if n > 3 %}<span class="mmore">+{{ n - 3 }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

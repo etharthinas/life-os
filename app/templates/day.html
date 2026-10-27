@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar, photo_picker %}
+{% block title %}{{ day.month }}월 {{ day.day }}일 · life-os{% endblock %}
+{% block content %}
+{% set wd = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"] %}
+<header class="section">
+  <div class="day-head">
+    <div class="date">
+      <span class="eyebrow">{{ day.year }} · {{ wd[day.weekday()] }}</span>
+      <h1>{{ day.month }}월 {{ day.day }}일</h1>
+    </div>
+    <div class="nav">
+      {% if day != today %}<a class="today-pill" href="/">Today</a>{% endif %}
+      <a class="icon-link" href="/day/{{ prev.isoformat() }}" aria-label="Previous day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>
+      <a class="icon-link" href="/day/{{ next.isoformat() }}" aria-label="Next day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a>
+      <a class="icon-link" href="/settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+    </div>
+  </div>
+  <nav class="week" aria-label="This week">
+    {% for d, n in week %}
+    <a href="{{ '/' if d == today else '/day/' ~ d.isoformat() }}" class="{% if n %}has{% endif %}{% if d == today %} is-today{% endif %}" {% if d == day %}aria-current="date"{% endif %}>
+      <span class="{% if d.weekday() == 6 %}sun{% endif %}">{{ "월화수목금토일"[d.weekday()] }}</span>
+      <span class="d">{{ d.day }}</span><span class="dot"></span>
+    </a>
+    {% endfor %}
+  </nav>
+</header>
+
+{% if settings.last_sync and not settings.last_sync.ok %}
+  <p class="notice">Calendar sync is failing{% if settings.last_sync.expired %}: the Google login expired{% endif %}. <a href="/settings">Open settings</a></p>
+{% elif not connected %}
+  <p class="notice">Google Calendar isn't connected, so only todos are planned. <a href="/settings">Open settings</a></p>
+{% endif %}
+
+<section class="section">
+  <div class="section-head"><h2>Schedule</h2>
+    <form method="post" action="/day/{{ day.isoformat() }}/plan"><button class="btn-quiet">{{ "Re-plan" if blocks else "Plan todos" }}</button></form>
+  </div>
+  {% if all_day %}<div class="allday">{% for e in all_day %}<span style="--c: {{ e.color or 'var(--ink-3)' }}">{{ e.summary or "Busy" }}</span>{% endfor %}</div>{% endif %}
+  <div class="card">
+    <ul class="schedule">
+    {% for x in timed %}
+      {% if x.type == "event" %}
+      <li class="{% if x.transparent %}free{% endif %}" style="--c: {{ x.color or 'var(--ink-3)' }}">
+        <time><span>{{ x.start_at | local("%H:%M") }}</span><span class="end">{{ x.end_at | local("%H:%M") }}</span></time>
+        <span class="bar"></span>
+        <span class="what"><span class="title">{{ x.summary or "Busy" }}</span><span class="src">{{ "Planned by life-os" if x.lifeos_block else x.calendar }}</span></span>
+        <span></span>
+      </li>
+      {% else %}
+      <li class="block">
+        <time><span>{{ x.start_at | local("%H:%M") }}</span><span class="end">{{ x.end_at | local("%H:%M") }}</span></time>
+        <span class="bar"></span>
+        <span class="what"><span class="title">{{ x.title }}</span><span class="src">Suggested block</span></span>
+        <span class="acts">
+          <form method="post" action="/day/{{ day.isoformat() }}/accept"><input type="hidden" name="block_id" value="{{ x.id }}"><button class="btn-quiet" aria-label="Add to calendar" title="Add to calendar">✓</button></form>
+          <form method="post" action="/blocks/{{ x.id }}/dismiss"><input type="hidden" name="d" value="{{ day.isoformat() }}"><button class="btn-quiet" aria-label="Dismiss" title="Dismiss">✕</button></form>
+        </span>
+      </li>
+      {% endif %}
+    {% else %}
+      <li class="empty">No events{% if not all_day %} on the calendar{% endif %}.</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% if blocks %}
+  <form class="plan-bar" method="post" action="/day/{{ day.isoformat() }}/accept">
+    {% for b in blocks %}<input type="hidden" name="block_id" value="{{ b.id }}">{% endfor %}
+    <button class="btn btn-primary">Add {{ blocks | length }} blocks to calendar</button>
+  </form>
+  {% endif %}
+</section>
+
+{% include "_day_todos.html" %}
+<div id="day-captures" class="captures"></div>
+
+<section class="section" id="journal">
+  <div class="section-head"><h2>Daily log</h2>
+    <span class="row-gap"><a class="hint" href="/journal">All days →</a>{% if doc and doc.html %}<a class="btn btn-quiet" href="/day/{{ day.isoformat() }}/journal/edit" hx-get="/day/{{ day.isoformat() }}/journal/edit" hx-target="#daylog-main" hx-swap="outerHTML" hx-push-url="false">Edit</a>{% endif %}</span></div>
+  <article class="card daylog">
+    <div id="daylog-main" class="daylog-main">
+      {% if doc and doc.html %}
+        <div class="prose">{{ doc.html }}</div>
+        {% set n = doc %}{% include "_extra_photos.html" %}
+      {% elif doc %}
+        {% set n = doc %}{% include "_extra_photos.html" %}
+      {% endif %}
+      <form class="daylog-add{% if doc and doc.html %} more{% endif %}" method="post" action="/logs" enctype="multipart/form-data">
+        <input type="hidden" name="d" value="{{ day.isoformat() }}">
+        <textarea id="log-body" name="body" rows="{{ 1 if doc and doc.html else 3 }}" placeholder="{{ 'Add more…' if doc and doc.html else ('What happened today?' if day == today else 'What happened this day?') }}"></textarea>
+        <div class="actions">{{ photo_picker() }}<button class="btn btn-primary">{{ "Add" if doc and doc.html else "Save" }}</button></div>
+      </form>
+    </div>
+    {% include "_day_people.html" %}
+  </article>
+</section>
+
+{% if notes %}
+<section class="section">
+  <div class="section-head"><h2>Notes from this day<span class="count">{{ notes | length }}</span></h2></div>
+  <ul class="card results">
+    {% for n in notes %}<li><article><div class="top"><a href="/notes/{{ n.id }}">{{ n.meta.title or "Note" }}</a><span>{{ n.meta.type }}</span></div>
+      <p class="excerpt">{{ n.body | note_body(160) }}</p></article></li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

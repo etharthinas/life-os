@@ -1,0 +1,16 @@
+{# A page of day journals for /journal; the last item loads the next page when it scrolls into view. #}
+{% for e in entries %}
+{% set d = e.occurred_at | local("%Y-%m-%d") %}
+<article class="card daylog jentry">
+  <a class="jdate" href="/day/{{ d }}"><span>{{ e.occurred_at | local("%Y.%m.%d") }}</span>
+    <span class="wd">{{ "일월화수목금토"[e.occurred_at | local("%w") | int] }}</span></a>
+  {% if e.html %}<div class="prose">{{ e.html }}</div>{% endif %}
+  {% set n = e %}{% include "_extra_photos.html" %}
+  {% if e.people %}<p class="jpeople">{% for p in e.people %}<a href="/people/{{ p.id }}"{% if p.kind == "group" %} class="grp"{% endif %}>{{ p.name }}</a>{% endfor %}</p>{% endif %}
+</article>
+{% endfor %}
+{% if next %}
+<div class="jmore" hx-get="/journal?before={{ next | urlencode }}" hx-trigger="revealed" hx-swap="outerHTML"><span class="hint">Loading…</span></div>
+{% elif not entries %}
+<p class="empty">No journals yet.</p>
+{% endif %}

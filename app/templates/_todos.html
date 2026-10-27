@@ -1,0 +1,17 @@
+{% from "_todo.html" import todo_row with context %}
+<div id="todos" class="section" hx-get="/todos/list" hx-trigger="todos-changed from:body" hx-swap="outerHTML">
+{% set groups = [
+  ("Overdue", todos | selectattr("due_on") | selectattr("due_on", "lt", today) | list),
+  ("Today", todos | selectattr("due_on", "equalto", today) | list),
+  ("Upcoming", todos | selectattr("due_on") | selectattr("due_on", "gt", today) | list),
+  ("Someday", todos | rejectattr("due_on") | list),
+] %}
+{% for label, items in groups if items %}
+  <div class="section">
+    <div class="section-head"><h2>{{ label }}<span class="count">{{ items | length }}</span></h2></div>
+    <div class="card"><ul class="todos">{% for t in items %}{{ todo_row(t) }}{% endfor %}</ul></div>
+  </div>
+{% else %}
+  <p class="empty">Nothing open. Add one above.</p>
+{% endfor %}
+</div>

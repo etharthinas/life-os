@@ -1,0 +1,26 @@
+# Cloud VM: `docker compose up -d --build`. The DB is Supabase (DATABASE_URL in .env), so the VM holds no data.
+# Web binds to localhost only; expose it to your devices with `tailscale serve --bg 8000`.
+x-logging: &logging  # cap container logs (default: unbounded)
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+
+services:
+  web:
+    build: .
+    env_file: .env
+    ports: ["127.0.0.1:8000:8000"]
+    restart: unless-stopped
+    logging: *logging
+  worker:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    logging: *logging
+  bot:  # off until TELEGRAM_BOT_TOKEN is set; enable with COMPOSE_PROFILES=telegram in .env
+    profiles: [telegram]
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.telegram"]
+    restart: unless-stopped
+    logging: *logging

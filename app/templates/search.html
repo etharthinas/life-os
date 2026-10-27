@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar %}
+{% block title %}Search · life-os{% endblock %}
+{% block content %}
+<header class="page-head"><h1>Search</h1></header>
+<form class="search-bar" action="/search">
+  <div class="search-field">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+    <input id="search-q" type="search" name="q" value="{{ q }}" placeholder="Search notes, journal and people" autocomplete="off" {% if not q %}autofocus{% endif %}>
+  </div>
+</form>
+{% if q and q | length < 2 %}<p class="empty">Type at least 2 characters.</p>{% endif %}
+{% if found_people %}
+<section class="section">
+  <div class="section-head"><h2>People<span class="count">{{ found_people | length }}</span></h2></div>
+  <ul class="faces">{% for m in found_people %}<li><a href="/people/{{ m.id }}">{{ avatar(m, "lg") }}<span>{{ m.name }}</span></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% if results %}
+<section class="section">
+  <div class="section-head"><h2>Notes<span class="count">{{ results | length }}{% if results | length == 50 %}+{% endif %}</span></h2></div>
+  <div class="card results">
+  {% for n in results %}
+    <article>
+      <div class="top"><a href="/notes/{{ n.id }}">{{ n.meta.title or "Journal entry" }}</a><span class="num">{{ n.occurred_at | local("%Y.%m.%d") }}</span></div>
+      <p class="excerpt">{{ n.body | note_body | excerpt(q) }}</p>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+{% elif q | length >= 2 and not found_people %}
+<p class="empty">Nothing matches “{{ q }}”.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+{# A group's own members: add and remove. #}
+{% from "_avatar.html" import avatar %}
+{% from "_picker.html" import picker %}
+<div id="members" class="members">
+  <ul class="member-grid">
+    {% for m in members %}
+    <li><a href="/people/{{ m.id }}">{{ avatar(m, "lg") }}<span>{{ m.name }}</span></a>
+      <button class="unpick" aria-label="Remove {{ m.name }} from {{ g.name }}" hx-post="/people/{{ g.id }}/members/{{ m.id }}/remove" hx-target="#members" hx-swap="outerHTML">✕</button></li>
+    {% endfor %}
+  </ul>
+  {{ picker("member:" ~ g.id, "＋ Add a member", "Add a member to " ~ g.name) }}
+</div>

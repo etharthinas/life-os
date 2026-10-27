@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0f15" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="life-os">
+  <title>{% block title %}life-os{% endblock %}</title>
+  <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
+  <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
+  <link rel="icon" href="{{ asset('icon-512.png') }}">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&display=swap">
+  <link rel="stylesheet" href="{{ asset('style.css') }}">
+  <script src="{{ asset('mention.js') }}" defer></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <!-- Start loading a page when a finger touches a link (or the mouse hovers it), not when it lifts. -->
+  <script src="https://unpkg.com/htmx-ext-preload@2.1.0/preload.js"></script>
+</head>
+<body hx-boost="true" hx-ext="preload">
+  <i id="asset-v" hidden data-css="{{ asset('style.css') }}"></i>
+  <main class="{% block main_class %}{% endblock %}" preload="mouseover">{% block content %}{% endblock %}</main>
+  {% set path = request.url.path %}
+  <nav class="tabbar" aria-label="Sections" preload="mouseover">
+    <ul>
+      <li><a href="/" {% if path == "/" or path.startswith("/day") %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/></svg>
+        Today</a></li>
+      <li><a href="/calendar" {% if path.startswith("/calendar") %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01"/></svg>
+        Month</a></li>
+      <li><a href="/todos" {% if path.startswith("/todos") %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="7" r="2.2"/><circle cx="6" cy="17" r="2.2"/><path d="M11 7h9M11 17h9"/></svg>
+        Todos</a></li>
+      <li><a href="/people" {% if path.startswith("/people") %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M15.5 5.2a3.3 3.3 0 0 1 0 6.6M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg>
+        People</a></li>
+      <li><a href="/search" {% if path.startswith("/search") or path.startswith("/notes") %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        Search</a></li>
+    </ul>
+  </nav>
+  <script>
+    // Show which photos were picked next to a hidden file input.
+    document.addEventListener("change", (e) => {
+      const input = e.target;
+      if (input.type !== "file") return;
+      const out = input.closest("label")?.querySelector(".picked");
+      if (out) out.textContent = input.files.length ? `${input.files.length} selected` : "";
+    });
+    // Paste a picture into a log or the editor: it's added to that form's photos (saved with it).
+    if (!window.pasteReady) {
+      window.pasteReady = true;
+      document.addEventListener("paste", (e) => {
+        const input = e.target.closest?.("form")?.querySelector('input[type=file][name=photos]');
+        const pics = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+        if (!input || !pics.length) return;
+        e.preventDefault();
+        const dt = new DataTransfer();
+        for (const f of [...input.files, ...pics]) dt.items.add(f);
+        input.files = dt.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+    // Offline-first: pages open from the last copy seen (see /sw.js). When the fresh copy differs,
+    // swap it in, unless you're in the middle of something (typing, a menu open).
+    if ("serviceWorker" in navigator && !window.swReady) {
+      window.swReady = true;
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      // The fresh copy can arrive before htmx has finished moving to the page: remember it, and
+      // check again once the page has settled.
+      const fresh = new Set();
+      const refresh = () => {
+        if (!fresh.has(location.href)) return;
+        const busy = document.activeElement?.matches("input, textarea, select") || document.querySelector("main details[open]");
+        if (busy) return;
+        fresh.delete(location.href);
+        htmx.ajax("GET", location.href, { target: "main", select: "main", swap: "outerHTML show:none",
+                                          headers: { "X-Fresh": "1" } });
+      };
+      navigator.serviceWorker.addEventListener("message", (e) => {
+        if (e.data?.type !== "fresh") return;
+        fresh.add(e.data.url);
+        refresh();
+      });
+      document.addEventListener("htmx:afterSettle", (e) => { if (e.detail.boosted || e.detail.requestConfig?.boosted) refresh(); });
+      addEventListener("pageshow", refresh);
+      // Warm the cache: shortly after the app opens, fetch the other tabs (and the days either side)
+      // so the first tap on them is instant too. They go through /sw.js, which saves them.
+      const warm = () => {
+        if (!navigator.serviceWorker.controller) return;
+        const links = [...document.querySelectorAll("nav.tabbar a[href], .day-head .nav a.icon-link[href^='/day/']")]
+          .map((a) => a.getAttribute("href")).filter((h) => h && h !== location.pathname);
+        links.forEach((h, i) => setTimeout(() => fetch(h, { headers: { "HX-Boosted": "true", "HX-Request": "true" } }).catch(() => {}), i * 150));
+      };
+      addEventListener("load", () => setTimeout(warm, 1500));
+      navigator.serviceWorker.startMessages?.();
+    }
+    // Boosted navigation swaps only <body>, so a page left open across a deploy would get new markup
+    // with the old stylesheet (unstyled chips etc.). If the page names a newer stylesheet, reload once.
+    if (!window.assetCheck) {
+      window.assetCheck = true;
+      document.addEventListener("htmx:afterSettle", () => {
+        const want = document.getElementById("asset-v")?.dataset.css;
+        const have = document.querySelector('link[rel=stylesheet][href*="style.css"]')?.getAttribute("href");
+        if (want && have && want !== have) location.reload();
+      });
+    }
+    // People picker: Enter picks the first match; Esc or a click elsewhere closes the list.
+    // (Boosted page loads re-run this script, so the listeners are added once.)
+    if (!window.pickerReady) {
+      window.pickerReady = true;
+      document.addEventListener("keydown", (e) => {
+        const input = e.target.closest?.(".picker input");
+        if (!input || e.isComposing) return;
+        const list = input.nextElementSibling;
+        if (e.key === "Enter") { e.preventDefault(); list.querySelector("button")?.click(); }
+        if (e.key === "Escape") { list.innerHTML = ""; input.blur(); }
+      });
+      document.addEventListener("click", (e) => {
+        document.querySelectorAll(".picker").forEach((p) => { if (!p.contains(e.target)) p.querySelector(".suggest").innerHTML = ""; });
+      });
+      // After a pick the list is re-rendered: put the cursor back in the same picker, so adding
+      // several people in a row (on a phone too) is pick, pick, pick.
+      let again = null;
+      document.addEventListener("click", (e) => {
+        if (e.target.closest(".picker .suggest button")) again = e.target.closest(".picker").querySelector("input")?.getAttribute("hx-get");
+      }, true);
+      document.addEventListener("htmx:afterSettle", () => {
+        if (!again) return;
+        const input = [...document.querySelectorAll(".picker input")].find((i) => i.getAttribute("hx-get") === again);
+        again = null;
+        input?.focus({ preventScroll: true });
+      });
+    }
+  </script>
+</body>
+</html>

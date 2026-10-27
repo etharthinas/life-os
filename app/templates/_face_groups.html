@@ -1,0 +1,38 @@
+{# A person's tagged faces by group, selectable: fix a wrong group or the odd faces in a mixed one. #}
+{% from "_picker.html" import picker %}
+<form id="face-groups" class="face-groups" onsubmit="return false">
+  {% for g in groups %}
+  <section class="face-group-sec">
+    <div class="section-head"><h2>Group {{ loop.index }}<span class="count">{{ g | length }}</span></h2>
+      <button type="button" class="btn-quiet" onclick="const bs = this.closest('section').querySelectorAll('input'); const all = [...bs].every(b => b.checked); bs.forEach(b => b.checked = !all); this.closest('form').dispatchEvent(new Event('change'))">Select group</button></div>
+    <ul class="face-grid">
+      {% for f in g %}
+      <li class="{{ f.status }}">
+        <label class="face-toggle sel"><input type="checkbox" name="face_ids" value="{{ f.id }}"><img class="face" src="/faces/{{ f.id }}.webp" alt="" loading="lazy"></label>
+        <a class="open" href="/people/{{ p.id }}/photos/{{ f.media_id }}" aria-label="Open photo">↗</a>
+        <button type="submit" class="star" formmethod="post" formaction="/people/{{ p.id }}/photo/face" name="face_id" value="{{ f.id }}" aria-label="Use as profile photo" onclick="this.form.onsubmit = null">★</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="empty">No faces tagged yet.</p>
+  {% endfor %}
+  <div class="sel-bar" hidden>
+    <span class="n"></span>
+    <button type="button" class="btn" hx-post="/people/{{ p.id }}/faces/reject" hx-include="#face-groups [name=face_ids]" hx-target="#face-groups" hx-swap="outerHTML">Not {{ p.name }}</button>
+    {{ picker("move:" ~ p.id, "It’s…", "Who these faces are") }}
+  </div>
+  <script>
+    (() => {
+      const form = document.getElementById("face-groups"), bar = form.querySelector(".sel-bar");
+      const update = () => {
+        const n = form.querySelectorAll("[name=face_ids]:checked").length;
+        bar.hidden = !n;
+        bar.querySelector(".n").textContent = `${n} selected`;
+      };
+      form.addEventListener("change", update);
+      update();
+    })();
+  </script>
+</form>

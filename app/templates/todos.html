@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Todos · life-os{% endblock %}
+{% block content %}
+<header class="page-head"><h1>Todos</h1></header>
+<form class="section composer" hx-post="/todos" hx-target="#captures" hx-swap="afterbegin" hx-on::after-request="if (event.detail.successful) this.reset()">
+  <textarea id="todo-text" name="text" rows="3" required
+            placeholder="Write it down however it comes out. 내일 엄마 선물 사기, 금요일까지 보고서…"></textarea>
+  <div class="actions">
+    <span class="hint">Claude turns this into todos, with dates. ⌘⏎ to add.</span>
+    <button class="btn btn-primary">Add</button>
+  </div>
+</form>
+<div id="captures" class="captures"></div>
+{% include "_todos.html" %}
+<script>
+  document.getElementById("todo-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); e.target.form.requestSubmit(); }
+  });
+</script>
+{% endblock %}

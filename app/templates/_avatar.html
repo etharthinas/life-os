@@ -1,0 +1,27 @@
+{% macro avatar(p, size="") -%}
+{%- if p.photo -%}
+<img class="avatar {{ size }}" src="/media/{{ p.photo }}/thumb" alt="" loading="lazy">
+{%- else -%}
+<span class="avatar {{ size }}" style="--h: {{ hue(p.name) }}" aria-hidden="true">{{ initials(p.name) }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro ago(days) -%}
+{%- if days is none %}never{% elif days == 0 %}today{% elif days == 1 %}yesterday{% elif days < 60 %}{{ days }}d ago{% elif days < 730 %}{{ (days / 30) | round | int }}mo ago{% else %}{{ (days / 365) | round(1) }}y ago{% endif -%}
+{%- endmacro %}
+
+{% macro when(n) -%}
+{%- if n == 0 %}today{% elif n == 1 %}tomorrow{% else %}in {{ n }}d{% endif -%}
+{%- endmacro %}
+
+{% macro photo_picker(name="photos", multiple=True) -%}
+<label class="file-btn">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="9" cy="10.5" r="1.8"/><path d="M21 16l-5-5-8 9"/></svg>
+  Photos <span class="picked"></span>
+  <input type="file" name="{{ name }}" accept="image/*" {% if multiple %}multiple{% endif %} hidden>
+</label>
+{%- endmacro %}
+
+{% macro back(href, label) -%}
+<a class="back" href="{{ href }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>{{ label }}</a>
+{%- endmacro %}

@@ -1,0 +1,18 @@
+{# The people picker's dropdown. `action` is where a pick goes, `target` what it re-renders. #}
+{% from "_avatar.html" import avatar %}
+{% for p in found %}
+<button type="button" role="option" hx-post="{{ action }}" hx-vals='{"person_id": {{ p.id }}}' hx-target="{{ target }}" hx-swap="outerHTML"{% if include %} hx-include="{{ include }}"{% endif %}>
+  {{ avatar(p, "sm") }}
+  <span class="who"><span class="name">{{ p.name }}</span>
+    <span class="sub">{% if p.about %}{{ p.about }}{% elif p.same_name > 1 and p.aliases %}{{ p.aliases | join(" · ") }}{% elif p.kind == "group" %}Group{% elif p.last_seen %}Last {{ p.last_seen | local("%Y.%m.%d") }}{% else %}No entries yet{% endif %}</span></span>
+</button>
+{% endfor %}
+{% if q %}
+<button type="button" role="option" class="new" hx-post="{{ action }}" hx-vals='{"name": {{ q | tojson }}}' hx-target="{{ target }}" hx-swap="outerHTML"{% if include %} hx-include="{{ include }}"{% endif %}>
+  <span class="avatar sm plus" aria-hidden="true">＋</span>
+  <span class="who"><span class="name">{{ new_label or "New person" }} “{{ q }}”</span>
+    <span class="sub">{% if exists %}Someone else with the same name{% elif new_label %}Adds it to People as a group{% else %}Adds them to People{% endif %}</span></span>
+</button>
+{% elif not found %}
+<p class="hint">Type a name.</p>
+{% endif %}

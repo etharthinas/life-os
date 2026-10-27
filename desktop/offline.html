@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>life-os</title>
+  <style>
+    :root { --paper: #f4f5f8; --ink: #191b2a; --ink-2: #646880; --accent: #3e48b8; color-scheme: light; }
+    @media (prefers-color-scheme: dark) { :root { --paper: #0e0f15; --ink: #e8e9f1; --ink-2: #9b9eb4; --accent: #9aa2fa; color-scheme: dark; } }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--paper); color: var(--ink); font: 15px/1.55 -apple-system, "Apple SD Gothic Neo", sans-serif;
+           display: grid; place-items: center; padding: 0 24px; -webkit-app-region: drag; }
+    main { max-width: 360px; text-align: center; display: flex; flex-direction: column; gap: 12px; }
+    h1 { font-size: 20px; margin: 0; }
+    p { margin: 0; color: var(--ink-2); }
+    button { -webkit-app-region: no-drag; font: 600 14px -apple-system, sans-serif; color: #fff; background: var(--accent);
+             border: none; border-radius: 999px; padding: 10px 20px; cursor: pointer; justify-self: center; margin: 8px auto 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Can't reach life-os</h1>
+    <p>The server is only reachable over Tailscale. Turn Tailscale on in the menu bar, then try again.</p>
+    <button onclick="window.lifeos.retry(new URLSearchParams(location.search).get('retry'))">Try again</button>
+  </main>
+</body>
+</html>

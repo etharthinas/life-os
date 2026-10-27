@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capture · life-os</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="{{ asset('style.css') }}">
+  <script src="{{ asset('mention.js') }}" defer></script>
+</head>
+<body class="capture-body">
+  <form class="capture" method="post" action="/capture">
+    <textarea id="capture-text" name="text" rows="3" placeholder="Jot it down. ⏎ journal · ⌘⏎ todo · esc close" autofocus></textarea>
+    <div class="capture-bar">
+      <span class="hint">{% if saved == "todo" %}Claude is sorting it into todos.{% elif saved %}Added to today’s journal.{% else %}&nbsp;{% endif %}</span>
+      <span class="row-gap">
+        <button class="btn" name="to" value="todo">Todo ⌘⏎</button>
+        <button class="btn btn-primary" name="to" value="journal">Journal ⏎</button>
+      </span>
+    </div>
+  </form>
+  <script>
+    const form = document.querySelector("form"), box = document.getElementById("capture-text");
+    box.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;  // isComposing: Korean IME
+      e.preventDefault();
+      form.requestSubmit(form.querySelector(`[value=${e.metaKey || e.ctrlKey ? "todo" : "journal"}]`));
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") window.lifeos?.hideCapture(); });
+    {% if saved %}setTimeout(() => window.lifeos?.hideCapture(), 900);{% endif %}
+  </script>
+</body>
+</html>

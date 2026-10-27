@@ -1,0 +1,8 @@
+{# A person's organizations: tags you can add to and remove. #}
+{% from "_picker.html" import picker %}
+<div id="orgs" class="orgs">
+  {% for g in orgs %}
+  <span class="org" style="--h: {{ hue(g.name) }}"><a href="/people/{{ g.id }}">{{ g.name }}</a><button class="unpick" aria-label="Remove {{ g.name }}" hx-post="/people/{{ pid }}/orgs/{{ g.id }}/remove" hx-target="#orgs" hx-swap="outerHTML">✕</button></span>
+  {% endfor %}
+  {{ picker("org:" ~ pid, "＋ Org", "Add an organization") }}
+</div>

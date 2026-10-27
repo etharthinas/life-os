@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar, ago, when, photo_picker, back %}
+{% block title %}{{ p.name }} · life-os{% endblock %}
+{% block content %}
+{{ back("/people", "People") }}
+<header class="profile">
+  <details class="pop avatar-pop">
+    <summary aria-label="Change profile photo">{{ avatar(p, "xl") }}<span class="cam" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span></summary>
+    <div class="pop-body avatar-choices">
+      <strong>Profile photo</strong>
+      {% if my_faces %}
+      <form class="face-pick" method="post" action="/people/{{ p.id }}/photo/face">
+        {% for f in my_faces[:12] %}<button name="face_id" value="{{ f.id }}" aria-label="Use this face"><img class="face" src="/faces/{{ f.id }}.webp" alt="" loading="lazy"></button>{% endfor %}
+      </form>
+      {% endif %}
+      {% if not my_faces and p.kind == "person" %}<a class="hint" href="/people/{{ p.id }}/faces">No faces tagged yet. Find {{ p.name }} in photos →</a>{% endif %}
+      <form class="row-gap" method="post" action="/people/{{ p.id }}/photo" enctype="multipart/form-data">
+        <label class="btn">Upload…<input type="file" name="photo" accept="image/*" hidden onchange="this.form.requestSubmit()"></label>
+        {% if p.photo_id %}<button class="btn-quiet" name="media_id" value="">Remove</button>{% endif %}
+      </form>
+    </div>
+  </details>
+  <div>
+    <h1>{{ p.name }}</h1>
+    {% if p.about %}<p class="about">{{ p.about }}</p>{% endif %}
+  </div>
+  {% if p.kind == "person" %}{% set pid = p.id %}{% include "_orgs.html" %}{% endif %}
+  {% if p.kind == "group" %}
+  <div class="group-meta">
+    {% if group.parent %}<span class="hint">Part of</span> <a class="org" style="--h: {{ hue(group.parent.name) }}" href="/people/{{ group.parent.id }}">{{ group.parent.name }}</a>{% endif %}
+    <details class="pop">
+      <summary class="btn-quiet">{{ "Move" if group.parent else "Put inside a group" }}</summary>
+      <form class="pop-body" method="post" action="/people/{{ p.id }}/parent">
+        <select name="parent_id">
+          <option value="">Not inside another group</option>
+          {% for x in all_groups %}<option value="{{ x.id }}" {% if group.parent and group.parent.id == x.id %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-primary">Save</button>
+      </form>
+    </details>
+    <a class="btn-quiet danger-link" href="#delete" onclick="const d = document.querySelector('details.more'); d.open = true; d.querySelector('.danger-zone').open = true;">Delete group</a>
+  </div>
+  {% endif %}
+</header>
+
+{% if p.kind == "person" %}
+<div class="contact-bar">
+  {% if phones %}
+  <a class="btn" href="tel:{{ phones[0] }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>Call</a>
+  <a class="btn" href="sms:{{ phones[0] }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/></svg>Message</a>
+  {% endif %}
+  {% if emails %}<a class="btn" href="mailto:{{ emails[0] }}">Email</a>{% endif %}
+  <a class="btn" href="/people/{{ p.id }}/contact.vcf" hx-boost="false">＋ Save to Contacts</a>
+</div>
+{% endif %}
+
+{# Details first: phone, birthday, nicknames, then the note's fields (학번 and so on). #}
+{% if phones or emails or p.birth_month or p.aliases or fields or p.raw_id %}
+<section class="section details">
+  {% if p.raw_id %}<div class="section-head"><h2>Details</h2><a class="hint" href="/notes/{{ p.raw_id }}">Original note</a></div>{% endif %}
+  {% if phones or emails or p.birth_month or p.aliases or fields %}
+  <dl class="card facts">
+    {% if phones %}<dt>Phone</dt><dd>{% for v in phones %}<a href="tel:{{ v }}" class="num">{{ v }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
+    {% if emails %}<dt>Email</dt><dd>{% for v in emails %}<a href="mailto:{{ v }}">{{ v }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
+    {% if p.birth_month %}<dt>Birthday</dt><dd class="num">{% if p.birth_year %}{{ p.birth_year }}.{% endif %}{{ "%02d" | format(p.birth_month) }}.{{ "%02d" | format(p.birth_day) }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</dd>{% endif %}
+    {% if p.aliases %}<dt>Nicknames</dt><dd>{{ p.aliases | join(", ") }}</dd>{% endif %}
+    {% for k, values in fields.items() %}<dt>{{ k }}</dt><dd>
+      {%- for v in values %}{{ v }}{% if not loop.last %}, {% endif %}{% endfor -%}
+    </dd>{% endfor %}
+  </dl>
+  {% endif %}
+</section>
+{% endif %}
+
+<ul class="card stats">
+  <li class="{% if p.overdue %}late{% endif %}"><b>{{ ago(p.days_since) }}</b><span>last seen</span></li>
+  <li><b>{{ p.mentions }}</b><span>entries</span></li>
+  {% if p.birthday %}<li class="bday"><b>{{ when(p.birthday_in) }}</b><span>{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></li>{% endif %}
+  {% if p.keep_in_touch_days %}<li><b>{{ p.keep_in_touch_days }}d</b><span>catch-up goal</span></li>{% endif %}
+</ul>
+{% if saved %}<p class="notice">Saved.</p>{% endif %}
+
+<form class="composer" method="post" action="/people/{{ p.id }}/log" enctype="multipart/form-data">
+  <textarea id="person-log" name="body" rows="2" placeholder="Saw {{ p.name }}? Write what happened."></textarea>
+  <div class="actions">{{ photo_picker() }}<button class="btn btn-primary">Save</button></div>
+</form>
+
+
+{% if p.kind == "group" %}
+<section class="section">
+  <div class="section-head"><h2>Subgroups{% if group.subgroups %}<span class="count">{{ group.subgroups | length }}</span>{% endif %}</h2></div>
+  <div class="subgroups">
+    {% for c in group.subgroups %}<a class="org" style="--h: {{ hue(c.name) }}" href="/people/{{ c.id }}">{{ c.name }}<b>{{ c.n }}</b></a>{% endfor %}
+    <form class="subgroup-add" method="post" action="/people/{{ p.id }}/subgroups">
+      <input name="name" placeholder="＋ New subgroup, e.g. {{ p.name }}-19" required autocomplete="off">
+    </form>
+  </div>
+</section>
+<section class="section">
+  <div class="section-head"><h2>Members<span class="count">{{ members | length }}{% if group.everyone > members | length %} · {{ group.everyone }} with subgroups{% endif %}</span></h2></div>
+  <p class="hint">Write “{{ p.name }}” or @{{ p.name }} in a day’s log (or add it under the day’s people) and everyone here{% if group.subgroups %} and in its subgroups{% endif %} is tagged for that day.</p>
+  {% set g = p %}{% include "_members.html" %}
+</section>
+{% elif members %}
+<section class="section">
+  <div class="section-head"><h2>Members<span class="count">{{ members | length }}</span></h2></div>
+  <ul class="faces">{% for m in members %}<li><a href="/people/{{ m.id }}">{{ avatar(m, "lg") }}<span>{{ m.name }}</span></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if often_with %}
+<section class="section">
+  <div class="section-head"><h2>Often with</h2></div>
+  <ul class="faces">{% for m in often_with %}<li><a href="/people/{{ m.id }}">{{ avatar(m, "lg") }}<span>{{ m.name }}</span></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if photos %}
+<section class="section">
+  <div class="section-head"><h2>Photos<span class="count">{{ photos | length }}</span></h2>
+    {% if p.kind == "person" %}<a class="hint" href="/people/{{ p.id }}/faces">{% if my_faces %}Tagged in {{ my_faces | length }}{% if my_faces | selectattr("status", "equalto", "auto") | list %} · check{% endif %}{% else %}Find faces{% endif %}</a>{% endif %}</div>
+  <div class="gallery">
+    {% for ph in photos[:36] %}<a href="/people/{{ p.id }}/photos/{{ ph.id }}"><img src="/media/{{ ph.sha256 }}/thumb" loading="lazy" alt=""></a>{% endfor %}
+  </div>
+  {% if photos | length > 36 %}<a class="hint" href="/people/{{ p.id }}/photos/{{ photos[36].id }}">See all {{ photos | length }} photos</a>{% endif %}
+</section>
+{% endif %}
+
+<section class="section" id="timeline">
+  <div class="section-head"><h2>Timeline<span class="count">{{ p.mentions }}</span></h2></div>
+  {% if timeline %}
+  {% macro entry(n) %}
+    <article>
+      <div class="when"><a href="/day/{{ n.occurred_at | local('%Y-%m-%d') }}">{{ n.occurred_at | local("%m.%d") }}</a><span>{{ n.occurred_at | local("%Y") }}</span></div>
+      <div class="what">
+        <a href="/notes/{{ n.id }}" class="excerpt">{{ n.body | note_body(320) or n.meta.title or "Photo" }}</a>
+        {% if n.photos %}<div class="strip">{% for ph in n.photos[:5] %}<a href="/people/{{ p.id }}/photos/{{ ph.id }}"><img src="/media/{{ ph.sha256 }}/thumb" loading="lazy" alt=""></a>{% endfor %}{% if n.photos | length > 5 %}<span class="more">+{{ n.photos | length - 5 }}</span>{% endif %}</div>{% endif %}
+      </div>
+    </article>
+  {% endmacro %}
+  <div class="timeline">{% for n in timeline[:10] %}{{ entry(n) }}{% endfor %}</div>
+  {% if timeline | length > 10 %}
+  <details class="timeline-more">
+    <summary class="btn-quiet">Show {{ timeline | length - 10 }} older</summary>
+    <div class="timeline">{% for n in timeline[10:] %}{{ entry(n) }}{% endfor %}</div>
+  </details>
+  {% endif %}
+  {% else %}
+  <p class="empty">No entries yet. Write above, or put [[{{ p.name }}]] in any journal entry.</p>
+  {% endif %}
+</section>
+
+<details class="more card pad">
+  <summary>Edit details</summary>
+  <div class="section">
+    <form class="form-grid" method="post" action="/people/{{ p.id }}">
+      <label for="f-name">Name<input id="f-name" name="name" value="{{ p.name }}" required></label>
+      <label for="f-about">About<input id="f-about" name="about" placeholder="e.g. 고등학교 친구, 회사 동료" value="{{ p.about or '' }}"></label>
+      <label for="f-bday">Birthday<input id="f-bday" name="birthday" placeholder="1998-03-07, or 03-07 without the year" value="{% if p.birth_month %}{% if p.birth_year %}{{ p.birth_year }}-{% endif %}{{ '%02d' | format(p.birth_month) }}-{{ '%02d' | format(p.birth_day) }}{% endif %}"></label>
+      <label for="f-aliases">Nicknames<input id="f-aliases" name="aliases" placeholder="Separate with commas" value="{{ p.aliases | join(', ') }}"></label>
+      <label for="f-kit">Catch up every
+        <select id="f-kit" name="keep_in_touch_days">
+          {% for d, label in [(0, "No goal"), (7, "Week"), (14, "2 weeks"), (30, "Month"), (60, "2 months"), (90, "3 months"), (180, "6 months"), (365, "Year")] %}
+          <option value="{{ d }}" {% if (p.keep_in_touch_days or 0) == d %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select></label>
+      <div class="row"><button class="btn btn-primary">Save</button></div>
+    </form>
+    <form class="row" method="post" action="/people/{{ p.id }}/photo" enctype="multipart/form-data" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <label class="file-btn">Upload a profile photo <span class="picked"></span><input type="file" name="photo" accept="image/*" hidden onchange="this.form.requestSubmit()"></label>
+      {% if p.photo_id %}<button class="btn-quiet" name="media_id" value="">Remove photo</button>{% endif %}
+    </form>
+    {% if photos %}<p class="hint">Or open any photo above and choose “Use as profile photo”.</p>{% endif %}
+    <details class="danger-zone" id="delete">
+      <summary class="btn-quiet">Delete {{ p.name }}…</summary>
+      <form method="post" action="/people/{{ p.id }}/delete" class="danger-confirm">
+        <p class="hint">Removes {{ p.name }} from People, with their face tags{% if p.kind == "group" %} and memberships{% else %}, organizations{% endif %} and links to entries. Your journal text and photos stay.{% if p.raw_id %} They come from an Obsidian note, so a re-import would bring them back unless the note is deleted too.{% endif %}</p>
+        <button class="btn btn-danger">Delete permanently</button>
+      </form>
+    </details>
+    {% if p.kind == "person" %}
+    <form class="row" method="post" action="/people/{{ p.id }}/me" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span class="hint">{% if is_me %}This is you: your face in photos is tagged as {{ p.name }}.{% else %}Is this you? Your face (in most photos) will be tagged as {{ p.name }}.{% endif %}</span>
+      <button class="btn{% if not is_me %} btn-primary{% endif %}" name="on" value="{{ '0' if is_me else '1' }}">{{ "Not me" if is_me else "This is me" }}</button>
+    </form>
+    {% endif %}
+  </div>
+</details>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% from "_avatar.html" import photo_picker %}
+<form class="editor{% if not inline %} card{% endif %}" id="{{ form_id or "" }}" method="post" action="{{ action }}" enctype="multipart/form-data">
+  <input type="hidden" name="back" value="{{ back }}">
+  <textarea id="editor-body" name="body" rows="14" placeholder="Write about this day. Paste or add photos." autofocus>{{ text }}</textarea>
+  <div class="actions">
+    {{ photo_picker() }}
+    <span class="row-gap">
+      <a class="btn btn-quiet" href="{{ back }}">Cancel</a>
+      <button class="btn btn-primary">Save</button>
+    </span>
+  </div>
+  <p class="hint">Markdown works: <code>## heading</code>, <code>- list</code>, <code>**bold**</code>. Delete a <code>![[photo]]</code> line to remove that photo.{% if inline %} Add people below.{% endif %}</p>
+</form>

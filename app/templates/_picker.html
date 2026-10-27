@@ -1,0 +1,8 @@
+{# A people picker input: type, then pick from the dropdown (Enter picks the first). #}
+{% macro picker(to, placeholder="＋ Person", label="Pick a person") -%}
+<div class="picker">
+  <input type="search" name="q" placeholder="{{ placeholder }}" autocomplete="off" enterkeyhint="done" aria-label="{{ label }}"
+         hx-get="/people/suggest?to={{ to }}" hx-trigger="focus, input changed delay:120ms" hx-target="next .suggest" hx-swap="innerHTML">
+  <div class="suggest" role="listbox"></div>
+</div>
+{%- endmacro %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}{{ p.name }} faces · life-os{% endblock %}
+{% block content %}
+{{ back("/people/" ~ p.id, p.name) }}
+<header class="page-head"><h1>{{ p.name }}</h1>
+  <form method="post" action="/people/{{ p.id }}/faces/confirm"><button class="btn">All correct</button></form>
+</header>
+<p class="hint section">Tagged faces, grouped by look. Tap faces (or “Select group”) that aren’t {{ p.name }}, then remove them or say who they are. Dashed = tagged automatically; ★ makes a face the profile photo.</p>
+{% if candidates %}
+<section class="section">
+  <div class="section-head"><h2>Is this {{ p.name }}?<span class="count">{{ candidates | length }}</span></h2></div>
+  <p class="hint">{% if is_me %}Faces that turn up in many of your photos{% else %}Faces from photos of days you were with {{ p.name }} (tagged with @, picked or in People:, not just named or brought along by a group){% endif %}: look-alikes of faces already tagged as {{ "you" if is_me else "them" }}, then faces seen far more often around {{ "you" if is_me else "them" }} than elsewhere, one per look. Tap the ones that are {{ "you" if is_me else "them" }}; the rest of {{ "your" if is_me else "their" }} photos get matched from these.</p>
+  <ul class="face-grid claim">
+    {% for f in candidates %}
+    <li>
+      <button class="claim-btn" hx-post="/people/{{ p.id }}/faces/claim" hx-vals='{"face_id": {{ f.id }}}' hx-target="closest li" hx-swap="outerHTML" aria-label="This is {{ p.name }}">
+        <img class="face" src="/faces/{{ f.id }}.webp" alt="" loading="lazy">
+        {% if f.tagged_name %}<span class="now">{{ f.tagged_name }}</span>{% elif not f.same_group and f.together > 1 %}<span class="now why">{{ f.together }} photos</span>{% endif %}
+      </button>
+      <a class="open" href="/people/{{ p.id }}/photos/{{ f.media_id }}" aria-label="Open photo">↗</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% include "_face_groups.html" %}
+{% endblock %}

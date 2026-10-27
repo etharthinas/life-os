@@ -1,0 +1,17 @@
+{# One face in a photo: who it is, with fixes. #}
+{% from "_picker.html" import picker %}
+<li id="face-{{ f.id }}" class="face-row">
+  <img class="face" src="/faces/{{ f.id }}.webp" alt="" loading="lazy">
+  {% if f.person_id %}
+    <span class="who"><a class="name" href="/people/{{ f.person_id }}">{{ f.name }}</a>
+      <span class="sub">{{ "Tagged automatically" if f.status == "auto" else "Tagged" }}</span></span>
+    <span class="acts">
+      {% if f.status == "auto" %}<button class="btn-quiet" hx-post="/faces/{{ f.id }}/assign" hx-vals='{"person_id": {{ f.person_id }}}' hx-target="#face-{{ f.id }}" hx-swap="outerHTML" title="Right">✓</button>{% endif %}
+      <button class="btn-quiet" hx-post="/faces/{{ f.id }}/reject" hx-target="#face-{{ f.id }}" hx-swap="outerHTML" title="Not {{ f.name }}">Not them</button>
+      <form method="post" action="/people/{{ f.person_id }}/photo/face"><button class="btn-quiet" name="face_id" value="{{ f.id }}" title="Use as {{ f.name }}’s profile photo">Profile</button></form>
+    </span>
+    <details class="change"><summary class="btn-quiet">Someone else…</summary>{{ picker("face:" ~ f.id, "Who is it?", "Who this face is") }}</details>
+  {% else %}
+    {{ picker("face:" ~ f.id, "Who is this?", "Who is this face") }}
+  {% endif %}
+</li>

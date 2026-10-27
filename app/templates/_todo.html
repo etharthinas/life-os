@@ -1,0 +1,24 @@
+{# One todo row. `d` = the day page it's on ("" on the Todos tab), so a change re-renders that list. #}
+{% macro todo_row(t, d="", target="#todos") -%}
+{% set done = t.status == "done" %}
+{% set show_due = t.due_on and (not d or t.due_on < today) %}
+<li class="p{{ t.priority }}{% if done %} done{% endif %}{% if not done and t.due_on and t.due_on < today %} overdue{% endif %}">
+  <button class="check" aria-label="{{ 'Mark open' if done else 'Done' }}"
+          hx-post="/todos/{{ t.id }}/status" hx-vals='{"status": "{{ "open" if done else "done" }}", "d": "{{ d }}"}' hx-target="{{ target }}" hx-swap="outerHTML"></button>
+  <span class="body">
+    <span class="title">{% if t.priority == 1 and not done %}<span class="flag">!</span> {% endif %}{{ t.title }}</span>
+    {% if t.project or t.estimate_min or show_due %}
+    <span class="tags">
+      {%- if show_due %}<span class="due num">{% if t.due_on == today %}today{% elif t.due_on < today %}{{ (today - t.due_on).days }}d overdue{% else %}{{ t.due_on.month }}/{{ t.due_on.day }} {{ "월화수목금토일"[t.due_on.weekday()] }}{% endif %}</span>{% endif -%}
+      {%- if t.estimate_min %}<span class="num">{{ t.estimate_min }}m</span>{% endif -%}
+      {%- if t.project %}<span>#{{ t.project }}</span>{% endif -%}
+    </span>
+    {% endif %}
+    {% if t.notes %}<span class="notes">{{ t.notes }}</span>{% endif %}
+  </span>
+  {% if not done %}
+  <button class="btn-quiet drop" aria-label="Drop" title="Drop"
+          hx-post="/todos/{{ t.id }}/status" hx-vals='{"status": "dropped", "d": "{{ d }}"}' hx-target="{{ target }}" hx-swap="outerHTML">✕</button>
+  {% endif %}
+</li>
+{%- endmacro %}

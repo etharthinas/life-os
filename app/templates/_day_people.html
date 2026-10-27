@@ -1,0 +1,55 @@
+{# Who was there, by meeting (a day can have several unrelated ones). Each meeting has its own
+   "@ who was there" field (static/mention.js); people also come from @mentions in the text (first
+   meeting) and from faces in the day's photos (📷); people only named in the text are listed
+   apart as "Mentioned"; a group brings its members along under one
+   chip, and people seen together in the photos who share a group are shown under it. #}
+{% from "_avatar.html" import avatar %}
+{% set many = day_people | length > 1 %}
+<div id="day-people" class="day-people{% if many %} many{% endif %}">
+  {% for mt in day_people %}
+  <div class="meeting">
+    {% if many %}
+    <div class="meeting-head">
+      <input class="meeting-title" name="title" value="{{ mt.title }}" placeholder="Meeting {{ mt.n + 1 }}" aria-label="Meeting name"
+             hx-post="/day/{{ day.isoformat() }}/meetings/{{ mt.n }}" hx-trigger="change, keyup changed delay:600ms" hx-swap="none">
+      <button class="unpick" title="Remove this meeting" aria-label="Remove meeting" hx-post="/day/{{ day.isoformat() }}/meetings/{{ mt.n }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
+    </div>
+    {% endif %}
+    <ul class="chips-people">
+      {% for m in mt.people %}
+      {% if m.kind == "group" %}
+      <li class="group-chip{% if m.from_photo %} from-photo{% endif %}" style="--h: {{ hue(m.name) }}">
+        <details>
+          <summary><span class="org"{% if m.from_photo %} title="Seen together in this day's photos"{% endif %}>{% if m.from_photo %}<i class="cam" aria-label="From photos">📷</i>{% endif %}{{ m.name }}<b>{{ m.members | length }}</b></span></summary>
+          <div class="group-members">
+            {% if m.from_photo %}<p class="hint">In this day's photos. ✕ on the group keeps the people, without the label.</p>{% endif %}
+            <a class="hint" href="/people/{{ m.id }}">{{ m.name }} directory →</a>
+            <ul>
+              {% for x in m.members %}
+              <li><a href="/people/{{ x.id }}">{{ avatar(x, "sm") }}<span>{{ x.name }}</span></a>
+                <button class="unpick" title="{{ 'Not there' if x.from_photo else 'Not there: the others stay, tagged one by one' }}" aria-label="Remove {{ x.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ x.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button></li>
+              {% else %}<li class="hint">No members yet.</li>{% endfor %}
+            </ul>
+          </div>
+        </details>
+        <button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>
+      </li>
+      {% else %}
+      <li class="{% if m.picked or m.from_photo %}picked{% endif %}{% if m.from_photo %} from-photo{% endif %}">
+        <a href="/people/{{ m.id }}" title="{{ 'In this day\'s photos' if m.from_photo else (m.about or '') }}">{{ avatar(m, "sm") }}<span>{{ m.name }}</span>{% if m.from_photo %}<i class="cam" aria-label="From photos">📷</i>{% endif %}</a>
+        {% if m.picked or m.from_photo %}<button class="unpick" aria-label="Remove {{ m.name }}" hx-post="/day/{{ day.isoformat() }}/people/{{ m.id }}/remove" hx-target="#day-people" hx-swap="outerHTML">✕</button>{% endif %}
+      </li>
+      {% endif %}
+      {% endfor %}
+    </ul>
+    <input class="meet-input" type="text" autocomplete="off" autocapitalize="off" enterkeyhint="done"
+           data-day="{{ day.isoformat() }}" data-meeting="{{ mt.n }}" aria-label="Add who was there{% if many %} ({{ mt.title or 'meeting ' ~ (mt.n + 1) }}){% endif %}"
+           placeholder="{{ '@ who was there' if not mt.people else '@ add someone' }}">
+    {% if mt.mentioned %}
+    <p class="mentioned" title="Named in the text ([[links]], group names), not people you were with. Write @name for that.">
+      <span>Mentioned</span>{% for x in mt.mentioned %}<a href="/people/{{ x.id }}">{{ x.name }}</a>{% endfor %}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <button class="btn-quiet add-meeting" hx-post="/day/{{ day.isoformat() }}/meetings" hx-target="#day-people" hx-swap="outerHTML">＋ Another meeting</button>
+</div>

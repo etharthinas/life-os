@@ -1,0 +1,32 @@
+{# A scratchpad capture: "sorting…" while Claude works (polls itself), then what was added, with Undo. #}
+<div class="capture-card{% if c.status == 'undone' %} undone{% endif %}" id="capture-{{ c.id }}"
+     {% if polling %}hx-get="/captures/{{ c.id }}" hx-trigger="load delay:1500ms" hx-swap="outerHTML"{% endif %}>
+  <div class="capture-head">
+    {% if c.status == "pending" %}
+      <span class="spinner" aria-hidden="true"></span>
+      <span>{% if polling %}Sorting into todos…{% else %}Still sorting. Refresh in a bit.{% endif %}</span>
+    {% elif c.status == "undone" %}
+      <span>Undone. Nothing was added.</span>
+    {% else %}
+      <span>Added {{ c.todos | length }} todo{{ "" if c.todos | length == 1 else "s" }}{% if c.status == "fallback" %} line by line (Claude was unreachable){% endif %}</span>
+      {% if c.todos %}<button class="btn-quiet" hx-post="/captures/{{ c.id }}/undo" hx-target="#capture-{{ c.id }}" hx-swap="outerHTML">Undo</button>{% endif %}
+    {% endif %}
+    <button class="btn-quiet dismiss" aria-label="Dismiss" onclick="this.closest('.capture-card').remove()">✕</button>
+  </div>
+  {% if c.status in ("done", "fallback") and c.todos %}
+  <ul class="capture-list">
+    {% for t in c.todos %}
+    <li><span>{% if t.priority == 1 %}<span class="flag">!</span> {% endif %}{{ t.title }}</span>
+      <span class="tags">
+        {%- if t.due_on %}<span class="num">{% if t.due_on == today %}today{% else %}{{ t.due_on.month }}/{{ t.due_on.day }} {{ "월화수목금토일"[t.due_on.weekday()] }}{% endif %}</span>{% endif -%}
+        {%- if t.estimate_min %}<span class="num">{{ t.estimate_min }}m</span>{% endif -%}
+        {%- if t.project %}<span>#{{ t.project }}</span>{% endif -%}
+      </span>
+      {% if t.notes %}<span class="capture-notes">{{ t.notes }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if c.note and c.status != "undone" %}<p class="capture-q">{{ c.note }}</p>{% endif %}
+  {% if c.status != "done" %}<p class="capture-text">{{ c.body }}</p>{% endif %}
+</div>

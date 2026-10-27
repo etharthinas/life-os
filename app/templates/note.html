@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}{{ n.meta.title or "Entry" }} · life-os{% endblock %}
+{% block content %}
+{{ back("/day/" ~ (n.occurred_at | local('%Y-%m-%d')), n.occurred_at | local("%Y.%m.%d")) }}
+<header class="page-head"><div class="section" style="gap:4px">
+  <span class="eyebrow">{{ n.meta.folder or n.source }}{% if n.meta.type and n.meta.type not in ("daily", "note") %} · {{ n.meta.type }}{% endif %}</span>
+  <h1>{{ n.meta.title or "Journal entry" }}</h1>
+</div></header>
+<article class="card note-page" id="note-body">
+  <div class="note-tools"><a class="btn btn-quiet" href="/entries/{{ n.id }}/edit" hx-get="/entries/{{ n.id }}/edit?back=/notes/{{ n.id }}" hx-target="#note-body" hx-swap="outerHTML" hx-push-url="false">Edit</a></div>
+  <div class="prose">{{ n.html }}</div>
+  {% include "_extra_photos.html" %}
+</article>
+{% if n.meta.path %}<p class="hint">{{ n.meta.path }}</p>{% endif %}
+{% endblock %}

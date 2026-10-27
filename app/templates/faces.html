@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% from "_picker.html" import picker %}
+{% block title %}Who is this? · life-os{% endblock %}
+{% block content %}
+{{ back("/people", "People") }}
+<header class="page-head"><h1>Who is this?</h1></header>
+<p class="hint section">Faces that show up in several photos but aren't tagged yet, most frequent first. Tap any face that isn’t the same person to leave it out, then name them. Their other photos get tagged too.</p>
+{% for g in groups %}
+<section class="card face-group" id="group-{{ g.cluster }}">
+  {# Only the faces shown get confirmed (tap one to leave it out); matching tags the rest of the group. #}
+  <div class="face-strip">{% for id in g.face_ids[:12] %}<label class="face-toggle"><input type="checkbox" name="face_ids" value="{{ id }}" checked><img class="face" src="/faces/{{ id }}.webp" alt="" loading="lazy"></label>{% endfor %}</div>
+  <div class="face-group-bar">
+    <span class="hint">{{ g.photos }} photos</span>
+    {{ picker("group:" ~ g.cluster, "Who is this?", "Who is this person") }}
+    <button class="btn-quiet" hx-post="/faces/group/{{ g.cluster }}/ignore" hx-include="#group-{{ g.cluster }} [name=face_ids]" hx-target="#group-{{ g.cluster }}" hx-swap="outerHTML" title="Strangers, posters, mixed faces">Skip</button>
+  </div>
+</section>
+{% else %}
+<p class="empty">Nothing to name right now. New photos are checked for faces every few minutes.</p>
+{% endfor %}
+{% endblock %}

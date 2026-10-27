@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar, ago, when %}
+{% block title %}People · life-os{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>People</h1>
+  <span class="row-gap">
+  <a class="btn" href="/people/graph">Graph</a>
+  <a class="btn" href="/people/contacts">Contacts</a>
+  <a class="btn" href="/faces">Faces</a>
+  <details class="pop">
+    <summary class="btn btn-primary">＋ New</summary>
+    <form class="pop-body" method="post" action="/people">
+      <input id="new-person" name="name" placeholder="Name" required autocomplete="off">
+      <input name="about" placeholder="About (optional): 고등학교 친구…" autocomplete="off">
+      <div class="chips">
+        <label><input type="radio" name="kind" value="person" checked><span>Person</span></label>
+        <label><input type="radio" name="kind" value="group"><span>Group</span></label>
+      </div>
+      <button class="btn btn-primary">Add</button>
+    </form>
+  </details>
+  </span>
+</header>
+
+<form class="search-bar" action="/people" hx-get="/people" hx-trigger="input changed delay:250ms from:input[type=search], change from:input[type=radio], change from:select, submit" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-push-url="true">
+  <div class="search-field">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+    <input id="people-q" type="search" name="q" value="{{ q }}" placeholder="Search names and nicknames" autocomplete="off">
+  </div>
+  <div class="filter-row">
+    <div class="chips">
+      {% for value, label in [("", "Everyone"), ("person", "People"), ("group", "Groups")] %}
+      <label><input type="radio" name="kind" value="{{ value }}" {% if kind == value %}checked{% endif %}><span>{{ label }}</span></label>
+      {% endfor %}
+    </div>
+    <span class="selects">
+      <select name="show" aria-label="Show">
+        {% for v, l in [("", "All"), ("birthday", "With birthday"), ("catchup", "To catch up"), ("quiet", "Not seen 6mo+"), ("nophoto", "No photo"), ("contact", "With phone/email")] %}
+        <option value="{{ v }}" {% if show == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+      <select name="sort" aria-label="Sort">
+        {% for v, l in [("recent", "Recently seen"), ("name", "Name"), ("entries", "Most entries"), ("birthday", "Next birthday")] %}
+        <option value="{{ v }}" {% if sort == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </span>
+  </div>
+  {% if orgs %}{% set cur = orgs | selectattr("id", "equalto", org) | first %}
+  <div class="org-filter-row">
+    {% if cur %}
+    <span class="org org-current" style="--h: {{ hue(cur.name) }}">{{ cur.name }}
+      <button type="button" class="unpick" aria-label="Clear organization" onclick="const f = this.form; f.querySelector('[name=org][value=\'\']').checked = true; f.querySelector('[name=org]').dispatchEvent(new Event('change', {bubbles: true}))">✕</button></span>
+    {% endif %}
+    <details class="pop org-filter">
+      <summary class="btn">{{ "Change" if cur else "Organization" }} ▾</summary>
+      <div class="pop-body org-menu">
+        <label><input type="radio" name="org" value="" {% if not org %}checked{% endif %}><span>All organizations</span></label>
+        {% for g in orgs %}
+        <label><input type="radio" name="org" value="{{ g.id }}" {% if org == g.id %}checked{% endif %}><span class="org" style="--h: {{ hue(g.name) }}">{{ g.name }}</span><b>{{ g.n }}</b></label>
+        {% endfor %}
+      </div>
+    </details>
+  </div>
+  {% endif %}
+</form>
+
+{% if browsing and upcoming %}
+<section class="section">
+  <div class="section-head"><h2>Birthdays<span class="count">next 30 days</span></h2></div>
+  <ul class="shelf">
+  {% for p in upcoming %}
+    <li><a class="card bday-card" href="/people/{{ p.id }}">{{ avatar(p, "lg") }}
+      <span class="name">{{ p.name }}</span>
+      <span class="when{% if p.birthday_in <= 1 %} soon{% endif %}">{{ when(p.birthday_in) }}</span>
+      <span class="sub">{{ p.birthday.month }}/{{ p.birthday.day }}{% if p.turns %} · turns {{ p.turns }}{% endif %}</span></a></li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if browsing and overdue %}
+<section class="section catchup">
+  <div class="section-head"><h2>Catch up<span class="count">{{ overdue | length }}</span></h2></div>
+  <ul class="shelf">
+  {% for p in overdue %}
+    <li><a class="card bday-card" href="/people/{{ p.id }}">{{ avatar(p, "lg") }}
+      <span class="name">{{ p.name }}</span>
+      <span class="when">{{ ago(p.days_since) }}</span>
+      <span class="sub">every {{ p.keep_in_touch_days }}d</span></a></li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="section">
+  <div class="section-head"><h2>{% if browsing %}Recently seen{% else %}Results{% endif %}<span class="count">{{ people | length }}</span></h2></div>
+  {% if people %}
+  <ul class="card people-list">
+  {% for p in people %}
+    <li><a href="/people/{{ p.id }}">
+      {{ avatar(p) }}
+      <span class="who">
+        <span class="name">{{ p.name }}{% if p.kind == "group" %}<span class="badge">group</span>{% endif %}</span>
+        {% if p.about %}<span class="aka">{{ p.about }}</span>{% endif %}
+        {% if p.orgs %}<span class="org-tags">{% for g in p.orgs[:3] %}<span class="org" style="--h: {{ hue(g.name) }}">{{ g.name }}</span>{% endfor %}{% if p.orgs | length > 3 %}<span class="more">+{{ p.orgs | length - 3 }}</span>{% endif %}</span>{% endif %}
+        {% if p.kind == "group" and p.members %}<span class="aka">{{ p.members }} members</span>{% endif %}
+      </span>
+      <span class="side">
+        {% if p.birthday_in is not none and p.birthday_in <= 7 %}<span class="bday">birthday {{ when(p.birthday_in) }}</span>{% endif %}
+        {% if p.last_seen %}<span class="{% if p.overdue %}late{% endif %}">{{ ago(p.days_since) }}</span><span>{{ p.mentions }} entries</span>{% else %}<span>no entries</span>{% endif %}
+      </span>
+    </a></li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">{% if q %}No one matches “{{ q }}”.{% else %}No people yet.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

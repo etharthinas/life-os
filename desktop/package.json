@@ -1,0 +1,36 @@
+{
+  "name": "life-os-desktop",
+  "productName": "life-os",
+  "version": "0.1.0",
+  "description": "Desktop shell for life-os (loads the server over Tailscale)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dir --arm64"
+  },
+  "build": {
+    "appId": "os.life.desktop",
+    "productName": "life-os",
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "icon.png",
+      "trayTemplate.png",
+      "trayTemplate@2x.png"
+    ],
+    "mac": {
+      "icon": "icon.png",
+      "identity": null,
+      "category": "public.app-category.productivity"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}

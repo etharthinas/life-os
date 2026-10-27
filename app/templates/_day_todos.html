@@ -1,0 +1,14 @@
+{% from "_todo.html" import todo_row with context %}
+<div id="day-todos" class="section" hx-get="/todos/list?d={{ day.isoformat() }}" hx-trigger="todos-changed from:body" hx-swap="outerHTML">
+  <div class="section-head"><h2>Todos{% if day_todos %}<span class="count">{{ day_todos | selectattr("status", "equalto", "done") | list | length }}/{{ day_todos | length }}</span>{% endif %}</h2>
+    <a class="hint" href="/todos">All todos</a></div>
+  <div class="card">
+    <ul class="todos">
+      {% for t in day_todos %}{{ todo_row(t, day.isoformat(), "#day-todos") }}{% else %}<li class="empty">Nothing due{% if day == today %} today{% endif %}.</li>{% endfor %}
+    </ul>
+  </div>
+  <form class="inline-add" hx-post="/todos" hx-target="#day-captures" hx-swap="afterbegin" hx-on::after-request="if (event.detail.successful) this.reset()">
+    <input type="hidden" name="d" value="{{ day.isoformat() }}">
+    <input id="new-todo" name="text" placeholder="Add todos for this day, in your own words" autocomplete="off" required>
+  </form>
+</div>

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}Graph · life-os{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{{ back("/people", "People") }}
+<header class="page-head graph-head">
+  <h1>Graph</h1>
+  <div class="search-field graph-find">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+    <input id="graph-q" type="search" placeholder="Find someone" autocomplete="off" list="graph-names">
+    <datalist id="graph-names"></datalist>
+  </div>
+</header>
+<div class="chips graph-toggles">
+  <label><input type="checkbox" id="show-org" checked><span>Organizations</span></label>
+  <label><input type="checkbox" id="show-tie" checked><span>Together in entries</span></label>
+</div>
+<div class="chips org-chips graph-orgs">
+  {% for g in orgs %}<label style="--h: {{ hue(g.name) }}"><input type="radio" name="focus-org" value="{{ g.id }}"><span>{{ g.name }} <b>{{ g.n }}</b></span></label>{% endfor %}
+</div>
+<div class="graph-wrap">
+  <svg id="graph" role="img" aria-label="People and organizations"></svg>
+  <p class="graph-loading hint">Laying out…</p>
+  <div class="graph-card" hidden></div>
+</div>
+<p class="hint">Dots are people (bigger = more entries), colored by their main organization; labelled circles are organizations. Lines join people to their organizations and people who appear in the same entries (thicker = more often). Pinch or scroll to zoom, tap someone to see their ties.</p>
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
+<script>
+(async () => {
+  const data = await (await fetch("/people/graph.json")).json();
+  const svg = d3.select("#graph"), wrap = document.querySelector(".graph-wrap");
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  svg.attr("viewBox", [-W / 2, -H / 2, W, H]);
+  const hue = (s) => [...s].reduce((a, c) => a + c.codePointAt(0), 0) * 47 % 360;
+  const byId = new Map(data.nodes.map((n) => [n.id, n]));
+  const orgHue = (n) => n.org != null && byId.get(n.org) ? hue(byId.get(n.org).name) : null;
+  const color = (n) => { const h = orgHue(n); return h == null ? "var(--ink-3)" : `hsl(${h} 55% 55%)`; };
+  const radius = (n) => n.kind === "group" ? 13 : Math.min(15, 3 + Math.sqrt(n.mentions) * 0.9);
+  const links = data.links.filter((l) => byId.has(l.source) && byId.has(l.target));
+  const neighbors = new Map(data.nodes.map((n) => [n.id, new Set()]));
+  links.forEach((l) => { neighbors.get(l.source).add(l.target); neighbors.get(l.target).add(l.source); });
+
+  const g = svg.append("g");
+  const link = g.append("g").attr("class", "links").selectAll("line").data(links).join("line")
+    .attr("class", (l) => "l-" + l.kind)
+    .attr("stroke-width", (l) => l.kind === "tie" ? Math.min(4, 0.6 + Math.sqrt(l.weight) * 0.5) : 1)
+    .attr("stroke", (l) => l.kind === "org" ? `hsl(${hue(byId.get(l.target).name)} 50% 60% / .35)` : null);
+  const node = g.append("g").selectAll("g").data(data.nodes).join("g")
+    .attr("class", (n) => "node " + n.kind).style("cursor", "pointer");
+  node.append("circle").attr("r", radius).attr("fill", color);
+  node.append("text").text((n) => n.name).attr("dy", (n) => n.kind === "group" ? 4 : -radius(n) - 3)
+    .attr("class", (n) => n.kind === "group" || n.mentions >= 12 ? "label" : "label minor");
+
+  const sim = d3.forceSimulation(data.nodes)
+    .force("link", d3.forceLink(links).id((n) => n.id)
+      .distance((l) => l.kind === "org" ? 45 : 32).strength((l) => l.kind === "org" ? 0.25 : Math.min(0.6, 0.1 + l.weight / 30)))
+    .force("charge", d3.forceManyBody().strength((n) => n.kind === "group" ? -260 : -45))
+    .force("collide", d3.forceCollide((n) => radius(n) + 2))
+    .force("x", d3.forceX().strength(0.04)).force("y", d3.forceY().strength(0.04))
+    .on("tick", () => {
+      link.attr("x1", (l) => l.source.x).attr("y1", (l) => l.source.y).attr("x2", (l) => l.target.x).attr("y2", (l) => l.target.y);
+      node.attr("transform", (n) => `translate(${n.x},${n.y})`);
+    })
+    .on("end", () => {
+      document.querySelector(".graph-loading").hidden = true;
+      // Fit everything in the frame once it has settled.
+      const xs = data.nodes.map((n) => n.x), ys = data.nodes.map((n) => n.y);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const k = Math.min(2, 0.9 / Math.max((x1 - x0) / W, (y1 - y0) / H));
+      svg.transition().duration(500).call(zoom.transform,
+        d3.zoomIdentity.scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
+    });
+
+  const zoom = d3.zoom().scaleExtent([0.2, 6]).on("zoom", (e) => {
+    g.attr("transform", e.transform);
+    svg.classed("zoomed", e.transform.k > 1.6);
+  });
+  svg.call(zoom).call(zoom.transform, d3.zoomIdentity.scale(0.75));
+  node.call(d3.drag()
+    .on("start", (e, n) => { if (!e.active) sim.alphaTarget(0.2).restart(); n.fx = n.x; n.fy = n.y; })
+    .on("drag", (e, n) => { n.fx = e.x; n.fy = e.y; })
+    .on("end", (e, n) => { if (!e.active) sim.alphaTarget(0); n.fx = n.fy = null; }));
+
+  const card = document.querySelector(".graph-card");
+  function focus(ids, n) {
+    const on = ids ? (x) => ids.has(x.id) : () => true;
+    node.classed("dim", (x) => !on(x));
+    link.classed("dim", (l) => ids && !(ids.has(l.source.id) && ids.has(l.target.id)));
+    if (!n) { card.hidden = true; return; }
+    const ties = links.filter((l) => l.kind === "tie" && (l.source.id === n.id || l.target.id === n.id))
+      .sort((a, b) => b.weight - a.weight).slice(0, 6)
+      .map((l) => (l.source.id === n.id ? l.target : l.source).name);
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+    card.innerHTML = `<a class="who" href="/people/${n.id}">${n.photo ? `<img class="avatar" src="/media/${n.photo}/thumb" alt="">` : ""}
+      <span><b>${esc(n.name)}</b><span class="sub">${n.kind === "group" ? `${neighbors.get(n.id).size} members` : `${n.mentions} entries`}${ties.length ? " · often with " + esc(ties.join(", ")) : ""}</span></span></a>`;
+    card.hidden = false;
+  }
+  node.on("click", (e, n) => { e.stopPropagation(); focus(new Set([n.id, ...neighbors.get(n.id)]), n); });
+  svg.on("click", () => { focus(null); document.querySelectorAll("[name=focus-org]").forEach((r) => r.checked = false); });
+
+  document.querySelectorAll("[name=focus-org]").forEach((r) => r.addEventListener("change", () => {
+    const n = byId.get(+r.value);
+    focus(new Set([n.id, ...neighbors.get(n.id)]), n);
+  }));
+  const toggle = () => {
+    link.style("display", (l) => document.getElementById(l.kind === "org" ? "show-org" : "show-tie").checked ? null : "none");
+  };
+  document.getElementById("show-org").addEventListener("change", toggle);
+  document.getElementById("show-tie").addEventListener("change", toggle);
+
+  const list = document.getElementById("graph-names");
+  data.nodes.forEach((n) => list.append(new Option(n.name)));
+  document.getElementById("graph-q").addEventListener("change", (e) => {
+    const n = data.nodes.find((x) => x.name === e.target.value.trim());
+    if (!n) return;
+    focus(new Set([n.id, ...neighbors.get(n.id)]), n);
+    svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.scale(2).translate(-n.x, -n.y));
+  });
+})();
+</script>
+{% endblock %}

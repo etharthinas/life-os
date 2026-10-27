@@ -1,0 +1,1 @@
+{% if n.extra_photos %}<div class="strip">{% for sha in n.extra_photos %}<a href="/media/{{ sha }}/orig"><img src="/media/{{ sha }}/thumb" loading="lazy" alt=""></a>{% endfor %}</div>{% endif %}

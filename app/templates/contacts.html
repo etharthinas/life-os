@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}Contacts · life-os{% endblock %}
+{% block content %}
+{{ back("/people", "People") }}
+<header class="page-head"><h1>Phone contacts</h1></header>
+
+{% if matched is not none %}<p class="notice ok-notice">Updated {{ matched }} people with phone numbers, emails and birthdays from your contacts.</p>{% endif %}
+{% if added is not none %}<p class="notice ok-notice">Added {{ added }} people.</p>{% endif %}
+
+<section class="section card pad steps">
+  <h2 class="h-sm">From your phone → here</h2>
+  <ol>
+    <li>On iPhone: <b>Contacts</b> → <b>Lists</b> → touch and hold <b>All Contacts</b> → <b>Export</b>, save the file. (Or icloud.com/contacts → select all → Export vCard. Google: contacts.google.com → Export → vCard.)</li>
+    <li>Upload it here. People are matched by phone number, then by name; their numbers, emails and birthdays are filled in. Nothing is overwritten.</li>
+  </ol>
+  <form class="row-gap" method="post" action="/people/contacts/import" enctype="multipart/form-data">
+    <label class="btn btn-primary">Upload .vcf<input type="file" name="file" accept=".vcf,text/vcard,text/x-vcard" hidden onchange="this.form.requestSubmit()"></label>
+  </form>
+</section>
+
+<section class="section card pad steps">
+  <h2 class="h-sm">From here → your phone</h2>
+  <p>Each person has <b>＋ Save to Contacts</b> on their page. Or take everyone at once (with organizations and birthdays):</p>
+  <a class="btn" href="/people/contacts.vcf" hx-boost="false">Download all as .vcf</a>
+</section>
+
+{% if pending %}
+<section class="section">
+  <div class="section-head"><h2>Not in People yet<span class="count">{{ pending | length }}</span></h2>
+    <form method="post" action="/people/contacts/dismiss"><button class="btn-quiet">Clear list</button></form></div>
+  <p class="hint">Contacts that matched no one. Tick the ones you want as people.</p>
+  <form method="post" action="/people/contacts/add" class="pending-form">
+    <ul class="card people-list pending">
+      {% for c in pending %}
+      <li><label>
+        <input type="checkbox" name="uids" value="{{ c.uid }}">
+        <span class="who"><span class="name">{{ c.name }}</span>
+          <span class="aka">{{ ((c.phones or []) + (c.emails or [])) | join(" · ") }}{% if c.org %} · {{ c.org }}{% endif %}</span></span>
+      </label></li>
+      {% endfor %}
+    </ul>
+    <div class="sel-bar"><button class="btn btn-primary">Add selected</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

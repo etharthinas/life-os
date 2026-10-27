@@ -1,0 +1,15 @@
+<div id="gifts" class="section">
+  <div class="card">
+    <ul class="gifts">
+    {% for g in p.gift_ideas %}
+      <li><span>{{ g }}</span>
+        <button class="btn-quiet" hx-post="/people/{{ p.id }}/gifts" hx-vals='{"remove": {{ g | tojson }}}' hx-target="#gifts" hx-swap="outerHTML" aria-label="Remove {{ g }}">✕</button></li>
+    {% else %}
+      <li class="empty">No ideas yet.</li>
+    {% endfor %}
+    </ul>
+  </div>
+  <form class="inline-add" hx-post="/people/{{ p.id }}/gifts" hx-target="#gifts" hx-swap="outerHTML">
+    <input id="gift-add" name="add" placeholder="Add a gift idea" autocomplete="off" required>
+  </form>
+</div>
