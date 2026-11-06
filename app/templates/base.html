@@ -59,12 +59,28 @@
   </nav>
   <script>
     // Show which photos were picked next to a hidden file input.
-    document.addEventListener("change", (e) => {
-      const input = e.target;
-      if (input.type !== "file") return;
-      const out = input.closest("label")?.querySelector(".picked");
-      if (out) out.textContent = input.files.length ? `${input.files.length} selected` : "";
-    });
+    // iOS Safari (26.5+) can send a picked photo as 0 bytes when a service worker controls the page
+    // (WebKit bugs 319396, 319985); copies held in memory upload fine, so swap them in right away.
+    if (!window.photoPickReady) {
+      window.photoPickReady = true;
+      document.addEventListener("change", async (e) => {
+        const input = e.target;
+        if (input.type !== "file") return;
+        const out = input.closest("label")?.querySelector(".picked");
+        if (out) out.textContent = input.files.length ? `${input.files.length} selected` : "";
+        if (!input.files.length) return;
+        try {
+          const copies = await Promise.all([...input.files].map(async (f) =>
+            new File([await f.arrayBuffer()], f.name, { type: f.type, lastModified: f.lastModified })));
+          const dt = new DataTransfer();
+          copies.forEach((f) => dt.items.add(f));
+          input.files = dt.files;  // setting it doesn't fire "change" again
+        } catch {
+          input.value = "";
+          if (out) out.textContent = "couldn't read it, pick again";
+        }
+      });
+    }
     // Back / forward greyed out when there's nowhere to go (where the browser can tell).
     if (!window.histReady) {
       window.histReady = true;
@@ -223,6 +239,7 @@
           if (d.failed && !d.xhr?.status) toast("Couldn't load — check your connection", true);
           return;
         }
+        if (d.successful) window.caches?.delete("pages-v1").catch(() => {});  // see /sw.js
         // After the page has been swapped in, so the message lands on the new page.
         requestAnimationFrame(() => d.successful ? toast(`✓ ${job?.text || "Saved"}`)
           : toast(d.xhr?.status ? `Didn't work (${d.xhr.status}) — try again` : "Didn't go through — check your connection and try again", true));

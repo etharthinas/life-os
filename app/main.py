@@ -777,7 +777,9 @@ def edit_person(person_id: int, name: str = Form(""), about: str = Form(""), ali
 def _ingest_uploads(files: list[UploadFile]) -> list[int]:
     ids = []
     for f in files:
-        if f.filename and f.size:
+        if f.filename:
+            if not f.size:  # the phone sent the file without its bytes: say so instead of saving nothing
+                raise HTTPException(400, f"photo arrived empty: {f.filename}")
             try:
                 ids.append(media.ingest(f.file.read(), None, "web"))  # named by hash when embedded
             except UnidentifiedImageError:

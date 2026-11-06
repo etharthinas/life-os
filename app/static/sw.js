@@ -2,7 +2,8 @@
 // - pages open at once from the last copy seen, and the fresh copy is fetched alongside; if it
 //   differs, the page is told and swaps it in (stale-while-revalidate);
 // - images and versioned files are immutable: served from the cache after the first time;
-// - any write (POST) clears the saved pages, so you never see a page without your own change.
+// - any write (POST) clears the saved pages, so you never see a page without your own change
+//   (writes themselves aren't handled here: they go straight to the network).
 const PAGES = "pages-v1";
 const ASSETS = "assets-v1";
 const CDN = /^(unpkg\.com|cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)$/;
@@ -69,9 +70,9 @@ async function page(e, req, url) {
 self.addEventListener("fetch", (e) => {
   const req = e.request, url = new URL(req.url);
   if (req.method !== "GET") {
-    if (url.origin === location.origin) {
-      e.respondWith(fetch(req).then(async (res) => { await caches.delete(PAGES); return res; }));
-    }
+    // Writes go straight to the network (passing uploads through here can empty them on iOS
+    // Safari); the page clears the saved pages again once the write is done.
+    if (url.origin === location.origin) e.waitUntil(caches.delete(PAGES));
     return;
   }
   if (isAsset(url)) e.respondWith(asset(req));
