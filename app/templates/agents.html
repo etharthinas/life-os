@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Agents · life-os{% endblock %}
+{% block content %}
+<header class="page-head"><h1>Agents</h1></header>
+<section class="section">
+  <div class="section-head"><h2>Channels</h2></div>
+  {% if channels %}
+  <ul class="card agent-list">
+    {% for c in channels %}
+    <li><a href="/agents/c/{{ c.id }}"># {{ c.name }}{% if c.unread %} <span class="dot" aria-label="new"></span>{% endif %}</a>
+      <span class="hint">{{ c.repo_url or "no repo" }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">No channels yet.</p>{% endif %}
+</section>
+<details class="section">
+  <summary class="btn">New channel</summary>
+  <form class="card pad agent-form" method="post" action="/agents/channels">
+    <label>Name <input name="name" required placeholder="life-os"></label>
+    <label>Repo <input name="repo_url" placeholder="https://github.com/me/repo.git (empty: research only)"></label>
+    <label>Base branch <input name="default_branch" value="main"></label>
+    <button class="btn btn-primary">Add</button>
+  </form>
+</details>
+{% endblock %}

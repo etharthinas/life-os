@@ -1,0 +1,13 @@
+<script>
+  if (!window.agentSend) {
+    window.agentSend = true;
+    // Enter sends, Shift-Enter makes a new line (phones: the button). ⌘⏎ also sends.
+    document.addEventListener("keydown", (e) => {
+      const ta = e.target.closest?.(".agent-composer textarea");
+      if (!ta || e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+      if (matchMedia("(hover: none)").matches && !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      ta.form.requestSubmit();
+    });
+  }
+</script>

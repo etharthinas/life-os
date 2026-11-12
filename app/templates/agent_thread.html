@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}{{ t.title }} · Agents{% endblock %}
+{% block content %}
+{{ back("/agents/c/" ~ t.channel_id, "#" ~ t.channel_name) }}
+<header class="page-head"><h1 class="agent-h1">{{ t.title }}</h1></header>
+{% include "_agent_thread.html" %}
+<form class="composer agent-composer" method="post" action="/agents/t/{{ t.id }}/reply">
+  <textarea name="text" rows="2" required placeholder="Reply to @{{ t.agent_name }}…"></textarea>
+  <div class="actions"><span class="hint">Continues the same session. ⌘⏎ to send.</span><button class="btn btn-primary">Send</button></div>
+</form>
+{% include "_agent_send.html" %}
+<script>
+  // Keep the newest message in view while the thread fills in, unless I've scrolled up to read.
+  if (!window.agentScroll) {
+    window.agentScroll = true;
+    let atBottom = true;
+    addEventListener("scroll", () => { atBottom = innerHeight + scrollY > document.body.scrollHeight - 200; });
+    document.addEventListener("htmx:afterSwap", (e) => {
+      if (e.detail.target.id === "agent-thread" && atBottom) scrollTo(0, document.body.scrollHeight);
+    });
+  }
+  scrollTo(0, document.body.scrollHeight);
+</script>
+{% endblock %}

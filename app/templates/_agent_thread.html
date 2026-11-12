@@ -1,0 +1,23 @@
+{% set live = t.status in ("queued", "running") %}
+<div id="agent-thread" class="section"
+     {% if live %}hx-get="/agents/t/{{ t.id }}/messages" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <p class="agent-meta">
+    <span class="agent-status s-{{ t.status }}">{{ t.status }}</span>
+    @{{ t.agent_name }}
+    {% if t.pr_url %}· <a href="{{ t.pr_url }}" target="_blank" rel="noopener">PR</a>{% endif %}
+    {% if t.kind == "code" and t.repo_url %}· <code>agent/{{ t.id }}</code>{% endif %}
+    {% if live %}
+    <form method="post" action="/agents/t/{{ t.id }}/cancel" class="inline"><button class="btn btn-quiet">Cancel</button></form>
+    {% endif %}
+  </p>
+  <ol class="agent-msgs">
+    {% for m in msgs %}
+    <li class="m-{{ m.author }}">
+      {% if m.author == "system" %}<span class="hint">{{ m.body }}</span>
+      {% else %}<div class="m-body">{{ m.body | md }}</div>{% endif %}
+    </li>
+    {% endfor %}
+    {% if t.status == "queued" %}<li class="m-system"><span class="hint">Waiting for its turn…</span></li>
+    {% elif t.status == "running" %}<li class="m-system"><span class="hint">Working…</span></li>{% endif %}
+  </ol>
+</div>

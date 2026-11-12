@@ -17,7 +17,7 @@ from markupsafe import Markup, escape
 from PIL import UnidentifiedImageError
 from psycopg.types.json import Jsonb
 
-from . import capture, config, contacts, days, db, faces, google, journal, media, people, storage
+from . import agents, capture, config, contacts, days, db, faces, google, journal, media, people, storage
 from .notetext import parse_birthday, split_frontmatter
 
 HERE = Path(__file__).parent
@@ -46,6 +46,7 @@ def _excerpt(text: str, q: str, width: int = 70) -> Markup:
 
 
 templates.env.filters["excerpt"] = _excerpt
+templates.env.filters["md"] = lambda text: media.render_markdown(text, {}, {}, {})
 templates.env.filters["linked"] = lambda text: media.render(text, {}, people.directory(), {})
 templates.env.globals.update(initials=people.initials, hue=people.hue)
 
@@ -1116,3 +1117,83 @@ def healthz():
     with db.connect() as conn:
         conn.execute("select 1")
     return {"ok": True}
+
+
+# --- Agents tab ---------------------------------------------------------------------------------
+
+def _or_404(row):
+    if row is None:
+        raise HTTPException(404)
+    return row
+
+
+@app.get("/agents", response_class=HTMLResponse)
+def agents_page(request: Request):
+    return _render(request, "agents.html", channels=agents.channels())
+
+
+@app.post("/agents/channels")
+def agents_new_channel(name: str = Form(...), repo_url: str = Form(""), default_branch: str = Form("main")):
+    cid = agents.save_channel(name, repo_url, default_branch)
+    return RedirectResponse(f"/agents/c/{cid}", status_code=303)
+
+
+@app.get("/agents/c/{cid}", response_class=HTMLResponse)
+def agents_channel(request: Request, cid: int):
+    ch = _or_404(agents.channel(cid))
+    return _render(request, "agent_channel.html", ch=ch, members=agents.channel_agents(cid),
+                   tasks=agents.channel_tasks(cid), channels=agents.channels())
+
+
+@app.post("/agents/c/{cid}")
+def agents_edit_channel(cid: int, name: str = Form(...), repo_url: str = Form(""), default_branch: str = Form("main")):
+    _or_404(agents.channel(cid))
+    agents.save_channel(name, repo_url, default_branch, cid)
+    return RedirectResponse(f"/agents/c/{cid}", status_code=303)
+
+
+@app.post("/agents/c/{cid}/agents")
+def agents_save_agent(cid: int, name: str = Form(...), kind: str = Form("code"), model: str = Form("sonnet"),
+                      role: str = Form(""), aid: int | None = Form(None)):
+    _or_404(agents.channel(cid))
+    if kind not in agents.TOOLS:
+        raise HTTPException(400)
+    agents.save_agent(cid, name, kind, model, role, aid)
+    return RedirectResponse(f"/agents/c/{cid}", status_code=303)
+
+
+@app.post("/agents/c/{cid}/tasks")
+def agents_new_task(cid: int, text: str = Form(...)):
+    _or_404(agents.channel(cid))
+    agent, text = agents.pick_agent(agents.channel_agents(cid), text.strip())
+    if agent is None or not text:
+        raise HTTPException(400, "Add an agent to this channel first")
+    return RedirectResponse(f"/agents/t/{agents.start_task(agent['id'], text)}", status_code=303)
+
+
+@app.get("/agents/t/{tid}", response_class=HTMLResponse)
+def agents_thread(request: Request, tid: int):
+    t = _or_404(agents.task(tid))
+    agents.mark_seen(tid)
+    return _render(request, "agent_thread.html", t=t, msgs=agents.messages(tid))
+
+
+@app.get("/agents/t/{tid}/messages", response_class=HTMLResponse)
+def agents_thread_messages(request: Request, tid: int):
+    t = _or_404(agents.task(tid))
+    if t["status"] not in ("queued", "running"):
+        agents.mark_seen(tid)
+    return _render(request, "_agent_thread.html", t=t, msgs=agents.messages(tid))
+
+
+@app.post("/agents/t/{tid}/reply")
+def agents_reply(tid: int, text: str = Form(...)):
+    if not text.strip() or not agents.reply(tid, text):
+        raise HTTPException(409, "Still running: wait for it, or cancel")
+    return RedirectResponse(f"/agents/t/{tid}", status_code=303)
+
+
+@app.post("/agents/t/{tid}/cancel")
+def agents_cancel(tid: int):
+    agents.cancel(tid)
+    return RedirectResponse(f"/agents/t/{tid}", status_code=303)

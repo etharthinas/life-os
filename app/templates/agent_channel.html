@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import back %}
+{% block title %}#{{ ch.name }} · Agents{% endblock %}
+{% block content %}
+{{ back("/agents", "Agents") }}
+<header class="page-head"><h1># {{ ch.name }}</h1></header>
+<p class="hint">{{ ch.repo_url or "no repo" }}{% if ch.repo_url %} · {{ ch.default_branch }}{% endif %}
+  · {% for a in members %}@{{ a.name }} <span class="muted">({{ a.kind }})</span>{% if not loop.last %}, {% endif %}{% else %}no agents yet{% endfor %}</p>
+
+<details class="section">
+  <summary class="btn btn-quiet">Channel settings</summary>
+  <form class="card pad agent-form" method="post" action="/agents/c/{{ ch.id }}">
+    <label>Name <input name="name" required value="{{ ch.name }}"></label>
+    <label>Repo <input name="repo_url" value="{{ ch.repo_url or '' }}"></label>
+    <label>Base branch <input name="default_branch" value="{{ ch.default_branch }}"></label>
+    <button class="btn">Save</button>
+  </form>
+  {% for a in members + [none] %}
+  <form class="card pad agent-form" method="post" action="/agents/c/{{ ch.id }}/agents">
+    {% if a %}<input type="hidden" name="aid" value="{{ a.id }}">{% endif %}
+    <label>Agent <input name="name" required value="{{ a.name if a else '' }}" placeholder="coder"></label>
+    <label>Kind <select name="kind">
+      {% for k in ("code", "research") %}<option {% if a and a.kind == k %}selected{% endif %}>{{ k }}</option>{% endfor %}
+    </select></label>
+    <label>Model <input name="model" value="{{ a.model if a else 'sonnet' }}"></label>
+    <label>Role <textarea name="role" rows="3" placeholder="What this agent is for, how it should work">{{ a.role if a else '' }}</textarea></label>
+    <button class="btn">{{ "Save" if a else "Add" }}</button>
+  </form>
+  {% endfor %}
+</details>
+
+<section class="section">
+  {% for t in tasks %}
+  <a class="card pad agent-task" href="/agents/t/{{ t.id }}">
+    <span class="agent-status s-{{ t.status }}">{{ t.status }}</span>
+    <span class="agent-title">{{ t.title }}</span>
+    <span class="hint">@{{ t.agent_name }} · {{ t.queued_at | local }}{% if t.pr_url %} · PR{% endif %}</span>
+  </a>
+  {% else %}<p class="empty">No tasks yet. Ask below.</p>{% endfor %}
+</section>
+
+{% if members %}
+<form class="composer agent-composer" method="post" action="/agents/c/{{ ch.id }}/tasks">
+  <textarea name="text" rows="2" required placeholder="@{{ members[0].name }} what should be done…"></textarea>
+  <div class="actions"><span class="hint">@name picks the agent. ⌘⏎ to send.</span><button class="btn btn-primary">Send</button></div>
+</form>
+{% endif %}
+{% include "_agent_send.html" %}
+{% endblock %}
