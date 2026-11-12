@@ -1,11 +1,15 @@
 FROM python:3.14-slim
 WORKDIR /srv
 # pg_dump for the nightly backup (same major version as Supabase's Postgres).
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 curl ca-certificates git gh \
     && rm -rf /var/lib/apt/lists/*
 # Claude Code: sorts the scratchpad into todos (`claude -p`). Auth: CLAUDE_CODE_OAUTH_TOKEN in .env.
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:$PATH" DISABLE_AUTOUPDATER=1
+# The agents service runs as a non-root user (Claude Code's tools run anything; keep them out of root).
+# /root isn't readable by it, so the claude binary is copied somewhere it is.
+RUN cp -L /root/.local/bin/claude /usr/local/bin/claude \
+    && useradd -m -u 1000 agent && mkdir -p /work && chown agent:agent /work
 # Fewer malloc arenas: threaded Python on a 1 GB box otherwise keeps a lot of freed memory.
 ENV MALLOC_ARENA_MAX=2
 # Face models (OpenCV zoo), checked against the hashes they had when chosen.

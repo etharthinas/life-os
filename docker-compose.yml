@@ -24,3 +24,18 @@ services:
     command: ["python", "-m", "app.telegram"]
     restart: unless-stopped
     logging: *logging
+  agents:  # Agents tab runner. Its own env file: no life-os secrets in reach of the agents' Bash.
+    build: .
+    env_file: .env.agents
+    environment: {AGENTS_WORK_DIR: /work}
+    command: ["python", "-m", "app.agents"]
+    user: agent
+    volumes:
+      - agents-work:/work            # repos and worktrees
+      - agents-home:/home/agent      # ~/.claude (sessions for --resume), git/gh config
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  agents-work:
+  agents-home:

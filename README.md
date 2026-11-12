@@ -39,3 +39,19 @@ tailscale serve --bg 8000         # https://<vm>.<tailnet>.ts.net, only your dev
 ```
 
 On iPhone, open that URL in Safari → Share → Add to Home Screen.
+
+## Agents tab
+
+Project channels with Claude Code agents in them (`app/agents.py`). The `agents` container takes
+one task at a time. Code agents work in a git worktree on `agent/<task id>` and get a PR opened;
+research agents get an empty folder and web tools. A reply in a thread continues the same session.
+
+Setup on the VM (once):
+1. Run the role SQL in the comment at the end of `migrations/023_agents.sql` (Supabase SQL editor).
+2. `cp .env.agents.example .env.agents` and fill it in. Use a fine-grained GitHub token, only for
+   the repos agents may touch.
+3. Swap, since the box has 1 GB: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`,
+   plus `/swapfile none swap sw 0 0` in `/etc/fstab`.
+4. `docker compose up -d --build`.
+
+Logs: `docker compose logs -f agents`.
