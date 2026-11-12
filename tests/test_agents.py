@@ -140,9 +140,12 @@ def test_workspace_and_publish(tmp_path, monkeypatch):
 
     t = {"id": 5, "kind": "code", "channel_id": 1, "repo_url": _origin(tmp_path),
          "default_branch": "main", "title": "Add notes"}
+    (agents.WORK / "env" / "1").mkdir(parents=True)
+    (agents.WORK / "env" / "1" / ".env").write_text("SECRET=1\n")
     wt = agents.workspace(t)
     assert _git("branch", "--show-current", cwd=wt) == "agent/5"
-    assert agents.publish(t, wt) is None                     # nothing changed: no PR
+    assert (wt / ".env").read_text() == "SECRET=1\n"
+    assert agents.publish(t, wt) is None                     # nothing changed (.env excluded): no PR
     (wt / "NOTES").write_text("x\n")                         # the agent left this uncommitted
     assert agents.publish(t, wt) == "https://github.com/me/r/pull/7"
     assert _git("log", "-1", "--format=%s", "agent/5", cwd=tmp_path / "origin.git") == "Add notes"

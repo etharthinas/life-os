@@ -247,6 +247,17 @@ def workspace(t: dict) -> Path:
                                 capture_output=True).returncode == 0
         wt.parent.mkdir(parents=True, exist_ok=True)
         _git("worktree", "add", "-B", branch, str(wt), f"origin/{branch if pushed else t['default_branch']}", cwd=repo)
+        # Untracked secrets (.env etc.) kept in /work/env/<channel id>, copied in and git-excluded so
+        # publish()'s `git add -A` never commits them.
+        env = WORK / "env" / str(t["channel_id"])
+        if env.is_dir():
+            files = [p.relative_to(env).as_posix() for p in env.rglob("*") if p.is_file()]
+            exclude = repo / ".git" / "info" / "exclude"
+            exclude.parent.mkdir(exist_ok=True)
+            have = exclude.read_text().splitlines() if exclude.exists() else []
+            with exclude.open("a") as f:
+                f.writelines(f"/{x}\n" for x in files if f"/{x}" not in have)
+            shutil.copytree(env, wt, dirs_exist_ok=True)
     return wt
 
 

@@ -10,6 +10,12 @@ ENV PATH="/root/.local/bin:$PATH" DISABLE_AUTOUPDATER=1
 # /root isn't readable by it, so the claude binary is copied somewhere it is.
 RUN cp -L /root/.local/bin/claude /usr/local/bin/claude \
     && useradd -m -u 1000 agent && mkdir -p /work && chown agent:agent /work
+# Agents SSH to project servers; the laeebly ones only through AWS SSM.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client unzip \
+    && curl -fsSL -o /tmp/aws.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
+    && cd /tmp && unzip -q aws.zip && ./aws/install \
+    && curl -fsSL -o /tmp/ssm.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
+    && dpkg -i /tmp/ssm.deb && rm -rf /tmp/aws* /tmp/ssm.deb /var/lib/apt/lists/*
 # Fewer malloc arenas: threaded Python on a 1 GB box otherwise keeps a lot of freed memory.
 ENV MALLOC_ARENA_MAX=2
 # Face models (OpenCV zoo), checked against the hashes they had when chosen.

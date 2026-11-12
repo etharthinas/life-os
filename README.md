@@ -64,6 +64,11 @@ Setup on the VM (once):
 5. Add `agents` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=telegram,agents`), then
    `docker compose up -d --build`.
 
+Per-channel secrets: files in `/work/env/<channel id>/` (e.g. `.env`) are copied into each task's
+worktree and git-excluded, so they're never committed. SSH: the agents' own key, `~/.ssh/config`,
+`known_hosts` and the AWS profile for SSM live in the `agents-home` volume (`/home/agent`); which
+hosts a channel may use is stated in its agents' roles.
+
 Logs: `docker compose logs -f agents`.
 
 Security notes:
