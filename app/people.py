@@ -642,11 +642,14 @@ with recursive tree(id) as (
 """
 
 
+# Everyone in group %(g)s or any of its subgroups.
+ALL_MEMBERS_SQL = TREE_SQL + ("select distinct ms.person_id from memberships ms join people p on p.id = ms.person_id "
+                              "where ms.group_id in (select id from tree) and p.kind = 'person'")
+
+
 def all_members(conn, group_id: int) -> list[int]:
     """Everyone in the group or any of its subgroups."""
-    return [r["person_id"] for r in conn.execute(
-        TREE_SQL + "select distinct ms.person_id from memberships ms join people p on p.id = ms.person_id "
-                   "where ms.group_id in (select id from tree) and p.kind = 'person'", {"g": group_id})]
+    return [r["person_id"] for r in conn.execute(ALL_MEMBERS_SQL, {"g": group_id})]
 
 
 GROUP_PAGE_SQL = TREE_SQL + """

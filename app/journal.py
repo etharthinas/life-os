@@ -7,7 +7,10 @@ are kept by id, so two people with the same name stay apart.
 """
 
 import json
+from contextlib import nullcontext
 from datetime import date, datetime, time, timedelta
+
+from psycopg import pq
 
 from . import capture, config, db, media
 from .notetext import FRONTMATTER, person_names, split_frontmatter, wikilinks
@@ -119,7 +122,7 @@ def strip_templates() -> int:
 
 def save(raw_id: int, text: str, media_ids=()) -> None:
     """Overwrite an entry's text (its frontmatter, hidden in the editor, is kept as it was)."""
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         row = conn.execute("select body from raw_entries where id = %s for update", (raw_id,)).fetchone()
         if not row:
             raise KeyError(raw_id)
@@ -151,7 +154,7 @@ def save_day(d: date, text: str, source: str, media_ids=()) -> int:
         return doc["id"]
     if not text.strip() and not media_ids:
         return 0
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         body = "\n".join(x for x in (text.strip(), _embed_lines(conn, media_ids)) if x)
         raw_id = _create(conn, d, source, body)
         sync(conn, raw_id, body)
@@ -213,7 +216,7 @@ def resolve_names(conn, raw_id: int, text: str, meta: dict, met: set[int]) -> di
 
 def choose_name(raw_id: int, name: str, person_id: int | None) -> None:
     """You say who an ambiguous name in this entry is (None: back to guessing)."""
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         row = conn.execute("select body, meta from raw_entries where id = %s for update", (raw_id,)).fetchone()
         if not row:
             raise KeyError(raw_id)
@@ -229,7 +232,7 @@ def choose_name(raw_id: int, name: str, person_id: int | None) -> None:
 
 def _edit_meta(raw_id: int, change) -> None:
     """Change an entry's meta (`change(meta)` edits it in place), then re-derive its people."""
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         row = conn.execute("select body, meta from raw_entries where id = %s for update", (raw_id,)).fetchone()
         if not row:
             raise KeyError(raw_id)
@@ -288,9 +291,12 @@ def resolve_all() -> int:
     return n
 
 
+ME_SQL = "select (value ->> 'person_id')::bigint as id from settings where key = 'me'"
+
+
 def me_id(conn) -> int | None:
     """The diary's owner (People → "This is me"), who is never tagged in their own entries."""
-    r = conn.execute("select (value ->> 'person_id')::bigint as id from settings where key = 'me'").fetchone()
+    r = conn.execute(ME_SQL).fetchone()
     return r["id"] if r else None
 
 
@@ -305,18 +311,34 @@ def sync(conn, raw_id: int, body: str) -> None:
     tags its members under the hood (mention rows with via_group), unless it was taken off this entry
     (`meta.dissolved_groups`). Anyone taken off by hand (`meta.not_there`) stays off, and you (the
     diary's owner) are never tagged in your own entries.
+
+    Pipeline mode: the DB is a long round trip away and only reading a result waits for it, so
+    reads that don't depend on each other are all sent before the first is read, and writes go out
+    with the next read (tagging someone: ~34 round trips → ~10).
     """
-    from .people import all_members, directory, spans_in_text
+    # Entering and leaving a pipeline cost a round trip each: not again inside the caller's.
+    with conn.pipeline() if conn.pgconn.pipeline_status == pq.PipelineStatus.OFF else nullcontext():
+        _sync(conn, raw_id, body)
+
+
+def _sync(conn, raw_id: int, body: str) -> None:
+    from .people import ALL_MEMBERS_SQL, directory, spans_in_text
 
     fm, text = split_frontmatter(body)
     links, embeds = wikilinks(body)
-    meta = conn.execute("select meta from raw_entries where id = %s", (raw_id,)).fetchone()["meta"]
+    q_meta = conn.execute("select meta from raw_entries where id = %s", (raw_id,))
+    q_me = conn.execute(ME_SQL)
+    q_picked = conn.execute("select p.id, p.name from mentions m join people p on p.id = m.person_id "
+                            "where m.raw_id = %s and m.picked", (raw_id,))
+    # Re-derived tags come back in the meeting they were in (you may have dragged them there).
+    q_was_at = conn.execute("select person_id, meeting from mentions where raw_id = %s", (raw_id,))
+    q_media = conn.execute("select id, name from media where name = any(%s)", (embeds,))
+    meta = q_meta.fetchone()["meta"]
+    me = q_me.fetchone()
     dissolved = set(meta.get("dissolved_groups") or [])
-    away = set(meta.get("not_there") or []) | {me_id(conn)}
+    away = set(meta.get("not_there") or []) | {me["id"] if me else None}
     # A [[Name]] means the picked person of that name when there is one, else the first such person.
-    names = {**directory(), **{r["name"]: r["id"] for r in conn.execute(
-        "select p.id, p.name from mentions m join people p on p.id = m.person_id "
-        "where m.raw_id = %s and m.picked", (raw_id,))}}
+    names = {**directory(), **{r["name"]: r["id"] for r in q_picked.fetchall()}}
     # Words you linked to someone by hand, and words that aren't a name here (meta.hand_links, not_names).
     links, not_names = meta.get("hand_links") or {}, meta.get("not_names") or []
     spans = spans_in_text(text, links=links, not_names=not_names)
@@ -335,9 +357,7 @@ def sync(conn, raw_id: int, body: str) -> None:
     named |= fm_groups
     met = {x for x in met - away if not (kinds.get(x) == "group" and x in dissolved)}
     named = {x for x in named - met - away if not (kinds.get(x) == "group" and x in dissolved)}
-    # Re-derived tags come back in the meeting they were in (you may have dragged them there).
-    was_at = {r["person_id"]: r["meeting"] for r in conn.execute(
-        "select person_id, meeting from mentions where raw_id = %s", (raw_id,))}
+    was_at = {r["person_id"]: r["meeting"] for r in q_was_at.fetchall()}
     conn.execute("delete from mentions where raw_id = %s and (not picked or person_id = any(%s))",
                  (raw_id, [x for x in away if x is not None]))
     rows = [(raw_id, x, False, was_at.get(x, 0)) for x in sorted(met)] + [(raw_id, x, True, was_at.get(x, 0)) for x in sorted(named)]
@@ -347,8 +367,9 @@ def sync(conn, raw_id: int, body: str) -> None:
     groups = conn.execute(
         "select m.person_id, m.meeting from mentions m join people p on p.id = m.person_id "
         "where m.raw_id = %s and p.kind = 'group' and not m.named_only and not m.auto_group", (raw_id,)).fetchall()
-    rows = [(raw_id, m, g["person_id"], g["meeting"]) for g in groups for m in all_members(conn, g["person_id"])
-            if m not in away]
+    q_members = [conn.execute(ALL_MEMBERS_SQL, {"g": g["person_id"]}) for g in groups]  # sent together
+    rows = [(raw_id, m["person_id"], g["person_id"], g["meeting"]) for g, q in zip(groups, q_members)
+            for m in q.fetchall() if m["person_id"] not in away]
     if rows:
         # Members already tagged another way (`People:`, the text, photos) are at the group's meeting
         # (unless you put them somewhere yourself); someone only named was there after all.
@@ -357,14 +378,13 @@ def sync(conn, raw_id: int, body: str) -> None:
                                   "set via_group = case when mentions.named_only then excluded.via_group "
                                   "else mentions.via_group end, meeting = excluded.meeting, named_only = false "
                                   "where not mentions.picked", rows)
-    _sync_media(conn, raw_id, embeds)
+    _sync_media(conn, raw_id, embeds, {r["name"]: r["id"] for r in q_media.fetchall()})
     conn.execute("update raw_entries set meta = meta || jsonb_build_object('links', %s::jsonb, 'embeds', %s::jsonb) "
                  "where id = %s", (json.dumps(links, ensure_ascii=False), json.dumps(embeds, ensure_ascii=False), raw_id))
     photo_mentions(conn, raw_id, was_at)
 
 
-def _sync_media(conn, raw_id: int, embeds: list[str]) -> None:
-    by_name ={r["name"]: r["id"] for r in conn.execute("select id, name from media where name = any(%s)", (embeds,))}
+def _sync_media(conn, raw_id: int, embeds: list[str], by_name: dict[str, int]) -> None:
     conn.execute("delete from raw_media where raw_id = %s", (raw_id,))
     rows = [(raw_id, by_name[e], pos) for pos, e in enumerate(embeds) if e in by_name]
     if rows:
@@ -412,7 +432,8 @@ def photo_mentions(conn, raw_id: int | None = None, was_at: dict[int, int] | Non
     found = conn.execute(PHOTO_PEOPLE_SQL, {"raw": raw_id}).fetchall()
     args = {"raw": raw_id, "r": [r["raw_id"] for r in found], "p": [r["person_id"] for r in found],
             "m": [(was_at or {}).get(r["person_id"], 0) for r in found]}
-    with conn.transaction():
+    # Atomic: a transaction of its own, unless already in the caller's (a savepoint costs 3 round trips).
+    with conn.transaction() if conn.info.transaction_status == pq.TransactionStatus.IDLE else nullcontext():
         conn.execute("delete from mentions m where m.from_photo and not m.picked "
                      "and (%(raw)s::bigint is null or m.raw_id = %(raw)s) "
                      "and (m.raw_id, m.person_id) not in (select * from unnest(%(r)s::bigint[], %(p)s::bigint[]))", args)
@@ -447,13 +468,15 @@ def auto_groups(conn, raw_id: int | None = None) -> None:
     members: dict[int, set[int]] = {}
     size: dict[int, int] = {}
     orgs: dict[int, set[int]] = {}
-    for r in conn.execute(GROUPS_OF_SQL, (list(people),)):
+    q_groups = conn.execute(GROUPS_OF_SQL, (list(people),))
+    q_off = conn.execute("select id, meta from raw_entries where id = any(%s) and (meta ? 'not_there' "
+                         "or meta ? 'dissolved_groups' or meta ? 'ungrouped')", (list({r["raw_id"] for r in rows}),))
+    for r in q_groups.fetchall():
         members.setdefault(r["group_id"], set()).add(r["person_id"])
         size[r["group_id"]] = r["size"]
         orgs.setdefault(r["person_id"], set()).add(r["group_id"])
     off, ungrouped = {}, {}
-    for r in conn.execute("select id, meta from raw_entries where id = any(%s) and (meta ? 'not_there' "
-                          "or meta ? 'dissolved_groups' or meta ? 'ungrouped')", (list({r["raw_id"] for r in rows}),)):
+    for r in q_off.fetchall():
         off[r["id"]] = set(r["meta"].get("not_there") or []) | set(r["meta"].get("dissolved_groups") or [])
         ungrouped[r["id"]] = set(r["meta"].get("ungrouped") or [])
     at: dict[tuple[int, int], dict] = {}
@@ -490,14 +513,17 @@ def doc_id(d: date, source: str = "web") -> int:
 def pick_person(d: date, person_id: int, meeting: int = 0) -> None:
     """Add someone (or a group, with all its members) to one of the day's meetings. Not you. A group
     brings back members taken off the day before."""
-    from .people import all_members
+    from .people import ALL_MEMBERS_SQL
 
-    with db.connect() as conn:
-        if person_id == me_id(conn):
+    with db.connect() as conn, conn.pipeline(), conn.transaction():  # pipeline: see `sync`
+        q_me = conn.execute(ME_SQL)
+        q_doc = conn.execute(FIND_SQL, _bounds(d))
+        q_back = conn.execute(ALL_MEMBERS_SQL, {"g": person_id})
+        if (me := q_me.fetchone()) and person_id == me["id"]:
             return
-    raw_id = doc_id(d)
-    with db.connect() as conn, conn.transaction():
-        back = [person_id, *all_members(conn, person_id)]
+        doc = q_doc.fetchone() or {"id": _create(conn, d, "web", ""), "body": ""}
+        raw_id = doc["id"]
+        back = [person_id, *(r["person_id"] for r in q_back.fetchall())]
         conn.execute("update raw_entries set meta = jsonb_set(meta, '{not_there}', coalesce((select jsonb_agg(x) "
                      "from jsonb_array_elements(meta -> 'not_there') x where not x <@ to_jsonb(%s::bigint[])), '[]')) "
                      "where id = %s and meta ? 'not_there'", (back, raw_id))
@@ -510,8 +536,7 @@ def pick_person(d: date, person_id: int, meeting: int = 0) -> None:
                      "auto_group = false, "
                      "meeting = excluded.meeting", (raw_id, person_id, meeting))
         conn.execute("delete from mentions where raw_id = %s and via_group = %s", (raw_id, person_id))  # re-expanded below
-        doc = conn.execute("select id, body from raw_entries where id = %s", (raw_id,)).fetchone()
-        sync(conn, doc["id"], doc["body"])
+        sync(conn, raw_id, doc["body"])
 
 
 def label_group(d: date, meeting: int, group_id: int, person_ids: list[int] = (), group_ids: list[int] = ()) -> None:
@@ -520,7 +545,7 @@ def label_group(d: date, meeting: int, group_id: int, person_ids: list[int] = ()
     undoes an earlier ✕ on the group for that day. Groups chosen whole (`group_ids`) give up their
     label: their people (in `person_ids`) go under the new one."""
     raw_id = doc_id(d)
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         doc = conn.execute("select id from raw_entries where id = %s", (raw_id,)).fetchone()
         for g in group_ids:
             if g != group_id:
@@ -547,7 +572,7 @@ def unpick_person(d: date, person_id: int) -> None:
     """Take someone off the day: they stay off (`meta.not_there`), even if the text, a group or the
     photos would bring them back; the group they were under keeps everyone else. Taking a group off
     takes the members it brought along (not the ones tagged on their own)."""
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         doc = find(conn, d)
         if not doc:
             return
@@ -627,7 +652,7 @@ def _drop_from(conn, raw_id: int, key: str, ids: list[int]) -> None:
 def ungroup(d: date, group_id: int, member_ids: list[int]) -> None:
     """전체 해제: the group's label comes off and its people stay, each on their own, without being
     put under another group (bigger or smaller) instead (`meta.ungrouped`, until 묶기 labels them)."""
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         doc = find(conn, d)
         if not doc:
             return
@@ -650,7 +675,7 @@ def move_to_meeting(d: date, ids: list[int], meeting: int) -> None:
         meetings = day_people(d)
     if not (0 <= meeting < len(meetings)) or not ids:
         return
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         doc = find(conn, d)
         if not doc:
             return
@@ -775,7 +800,7 @@ def remove_meeting(d: date, n: int) -> None:
     meetings = day_people(d)
     if not (0 <= n < len(meetings)) or len(meetings) == 1:
         return
-    with db.connect() as conn, conn.transaction():
+    with db.connect() as conn, conn.pipeline(), conn.transaction():
         doc = find(conn, d)
         conn.execute("delete from mentions where raw_id = %s and meeting = %s and (picked or via_group is not null)",
                      (doc["id"], n))
