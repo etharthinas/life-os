@@ -5,7 +5,14 @@ takes one queued task at a time, runs `claude -p` in the task's workspace and st
 into the thread. For code agents it then pushes branch agent/<id> and opens a PR.
 """
 
+import json
+import os
 import re
+import signal
+import subprocess
+import threading
+import time
+from collections import deque
 
 from . import db
 
@@ -117,3 +124,81 @@ def cancel(tid: int) -> None:
 def mark_seen(tid: int) -> None:
     with db.connect() as conn:
         conn.execute("update agent_tasks set seen_at = now() where id = %s", (tid,))
+
+
+# --- runner -------------------------------------------------------------------------------------
+
+TOOLS = {"code": ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
+         "research": ["WebSearch", "WebFetch", "Read"]}
+TIMEOUT = int(os.environ.get("AGENT_TIMEOUT_MIN", "30")) * 60
+CODE_RULES = ("You work in a git worktree on your own branch. Commit your work with clear messages "
+              "when you're done. Don't push or open a pull request: that's done for you afterwards.")
+
+
+def build_cmd(agent: dict, session_id: str | None) -> list[str]:
+    tools = ",".join(TOOLS[agent["kind"]])
+    role = agent["role"] + ("\n\n" + CODE_RULES if agent["kind"] == "code" else "")
+    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--model", agent["model"],
+           "--append-system-prompt", role.strip(), "--tools", tools, "--allowedTools", tools,
+           "--permission-mode", "acceptEdits"]
+    return cmd + ["--resume", session_id] if session_id else cmd
+
+
+def _tool_line(name: str, inp: dict) -> str:
+    arg = next((str(inp[k]) for k in ("file_path", "command", "pattern", "query", "url") if inp.get(k)), "")
+    return f"{name} {arg.splitlines()[0][:100] if arg else ''}".strip()
+
+
+def parse_event(line: str) -> dict:
+    """One line of `claude -p --output-format stream-json`: the session id, thread messages, result."""
+    out = {"session": None, "messages": [], "result": None}
+    try:
+        ev = json.loads(line)
+    except json.JSONDecodeError:
+        return out
+    if ev.get("type") == "system" and ev.get("subtype") == "init":
+        out["session"] = ev.get("session_id")
+    elif ev.get("type") == "assistant":
+        for b in (ev.get("message") or {}).get("content") or []:
+            if b.get("type") == "text" and b.get("text", "").strip():
+                out["messages"].append(("agent", b["text"].strip()))
+            elif b.get("type") == "tool_use":
+                out["messages"].append(("system", _tool_line(b.get("name", "?"), b.get("input") or {})))
+    elif ev.get("type") == "result":
+        ok = ev.get("subtype") == "success" and not ev.get("is_error")
+        out["result"] = (ok, str(ev.get("result") or ev.get("subtype") or ""))
+    return out
+
+
+def run_claude(cmd, cwd, prompt: str, on_line, should_stop, timeout: int = TIMEOUT) -> str:
+    """Run `cmd` in `cwd` with `prompt` on stdin, handing each output line to `on_line`.
+
+    Returns "ok", "stopped" (should_stop() said so), "timeout", or "exit N: <last output>".
+    """
+    proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    proc.stdin.write(prompt)
+    proc.stdin.close()
+    why: list[str] = []
+
+    def watch():
+        end = time.monotonic() + timeout
+        while proc.poll() is None:
+            if should_stop():
+                why.append("stopped")
+            elif time.monotonic() > end:
+                why.append("timeout")
+            if why:
+                os.killpg(proc.pid, signal.SIGKILL)  # the whole group: claude's own children too
+                return
+            time.sleep(1)
+
+    threading.Thread(target=watch, daemon=True).start()
+    tail = deque(maxlen=10)
+    for line in proc.stdout:
+        tail.append(line)
+        on_line(line)
+    proc.wait()
+    if why:
+        return why[0]
+    return "ok" if proc.returncode == 0 else f"exit {proc.returncode}: {''.join(tail)[-500:]}"
