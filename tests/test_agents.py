@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 import textwrap
 import time
@@ -71,3 +72,57 @@ def test_run_claude_stop_and_timeout(tmp_path):
 def test_run_claude_exit_code(tmp_path):
     cmd = _script(tmp_path, "echo bad; exit 3\n")
     assert agents.run_claude(cmd, tmp_path, "", lambda _: None, lambda: False).startswith("exit 3")
+
+
+import subprocess
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _origin(tmp_path):
+    """A bare repo with one commit on main, standing in for GitHub."""
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git("init", "-b", "main", cwd=seed)
+    (seed / "README").write_text("hi\n")
+    _git("add", ".", cwd=seed)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init", cwd=seed)
+    _git("clone", "--bare", str(seed), str(tmp_path / "origin.git"), cwd=tmp_path)
+    return str(tmp_path / "origin.git")
+
+
+def test_workspace_and_publish(tmp_path, monkeypatch):
+    monkeypatch.setattr(agents, "WORK", tmp_path / "work")
+    for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(k, "agent")
+    for k in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(k, "agent@life-os")
+    # fake gh: `pr view` finds nothing; `pr create` prints a PR url
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "gh").write_text('#!/bin/sh\n[ "$2" = view ] && exit 1\necho https://github.com/me/r/pull/7\n')
+    (bin_ / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+
+    t = {"id": 5, "kind": "code", "channel_id": 1, "repo_url": _origin(tmp_path),
+         "default_branch": "main", "title": "Add notes"}
+    wt = agents.workspace(t)
+    assert _git("branch", "--show-current", cwd=wt) == "agent/5"
+    assert agents.publish(t, wt) is None                     # nothing changed: no PR
+    (wt / "NOTES").write_text("x\n")                         # the agent left this uncommitted
+    assert agents.publish(t, wt) == "https://github.com/me/r/pull/7"
+    assert _git("log", "-1", "--format=%s", "agent/5", cwd=tmp_path / "origin.git") == "Add notes"
+
+    # a later turn after the worktree was pruned continues from the pushed branch
+    import shutil
+    shutil.rmtree(wt)
+    _git("worktree", "prune", cwd=agents.WORK / "repos" / "1")
+    assert (agents.workspace(t) / "NOTES").exists()
+
+
+def test_research_workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(agents, "WORK", tmp_path / "work")
+    wt = agents.workspace({"id": 9, "kind": "research", "repo_url": None})
+    assert wt.is_dir() and wt == tmp_path / "work" / "scratch" / "9"

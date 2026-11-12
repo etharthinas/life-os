@@ -5,16 +5,20 @@ takes one queued task at a time, runs `claude -p` in the task's workspace and st
 into the thread. For code agents it then pushes branch agent/<id> and opens a PR.
 """
 
+import html
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
 import time
+import traceback
 from collections import deque
+from pathlib import Path
 
-from . import db
+from . import config, db
 
 
 def pick_agent(agents: list[dict], text: str) -> tuple[dict | None, str]:
@@ -202,3 +206,204 @@ def run_claude(cmd, cwd, prompt: str, on_line, should_stop, timeout: int = TIMEO
     if why:
         return why[0]
     return "ok" if proc.returncode == 0 else f"exit {proc.returncode}: {''.join(tail)[-500:]}"
+
+
+WORK = Path(os.environ.get("AGENTS_WORK_DIR", "/work"))
+
+
+def _git(*args, cwd) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def workspace(t: dict) -> Path:
+    """Where the task's turns run. Code channels: a worktree of the repo on branch agent/<id>, kept
+    across turns so `--resume` finds the same project. Otherwise an empty scratch folder."""
+    if t["kind"] != "code" or not t["repo_url"]:
+        d = WORK / "scratch" / str(t["id"])
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    repo, wt, branch = WORK / "repos" / str(t["channel_id"]), WORK / "worktrees" / str(t["id"]), f"agent/{t['id']}"
+    if not repo.exists():
+        repo.parent.mkdir(parents=True, exist_ok=True)
+        _git("clone", t["repo_url"], str(repo), cwd=repo.parent)
+    if not wt.exists():
+        _git("fetch", "origin", cwd=repo)
+        pushed = subprocess.run(["git", "rev-parse", "--verify", "-q", f"origin/{branch}"], cwd=repo,
+                                capture_output=True).returncode == 0
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        _git("worktree", "add", "-B", branch, str(wt), f"origin/{branch if pushed else t['default_branch']}", cwd=repo)
+    return wt
+
+
+def publish(t: dict, wt: Path) -> str | None:
+    """Commit what the agent left, push agent/<id>, and return its PR (opened if new). None: no changes."""
+    _git("add", "-A", cwd=wt)
+    if _git("status", "--porcelain", cwd=wt):
+        _git("commit", "-m", t["title"], cwd=wt)
+    if not _git("rev-list", f"origin/{t['default_branch']}..HEAD", cwd=wt):
+        return None
+    branch = f"agent/{t['id']}"
+    _git("push", "-f", "origin", f"HEAD:refs/heads/{branch}", cwd=wt)
+    seen = subprocess.run(["gh", "pr", "view", branch, "--json", "url", "-q", ".url"], cwd=wt,
+                          capture_output=True, text=True)
+    if seen.returncode == 0 and seen.stdout.strip():
+        return seen.stdout.strip()
+    out = subprocess.run(["gh", "pr", "create", "--head", branch, "--base", t["default_branch"],
+                          "--title", t["title"], "--body", f"Asked for in life-os: {config.PUBLIC_URL}/agents/t/{t['id']}"],
+                         cwd=wt, check=True, capture_output=True, text=True).stdout
+    m = re.search(r"https://\S+/pull/\d+", out)
+    return m[0] if m else out.strip()
+
+
+def _add_message(tid: int, author: str, body: str) -> None:
+    with db.connect() as conn:
+        conn.execute("insert into agent_messages (task_id, author, body) values (%s, %s, %s)", (tid, author, body))
+
+
+def _set(tid: int, column: str, value) -> None:
+    assert column in ("session_id", "pr_url")
+    with db.connect() as conn:
+        conn.execute(f"update agent_tasks set {column} = %s where id = %s", (value, tid))
+
+
+def _status(tid: int) -> str:
+    with db.connect() as conn:
+        return conn.execute("select status from agent_tasks where id = %s", (tid,)).fetchone()["status"]
+
+
+def _finish(tid: int, status: str, error: str | None = None) -> None:
+    with db.connect() as conn:  # a cancel that came in meanwhile stays a cancel
+        conn.execute("update agent_tasks set status = %s, error = %s, finished_at = now() "
+                     "where id = %s and status = 'running'", (status, error, tid))
+
+
+def _prompt(tid: int) -> str:
+    """What I've said since the agent last spoke: the request, or the follow-ups."""
+    with db.connect() as conn:
+        rows = conn.execute(
+            """select body from agent_messages where task_id = %s and author = 'me' and id >
+                 coalesce((select max(id) from agent_messages where task_id = %s and author <> 'me'), 0)
+               order by id""", (tid, tid)).fetchall()
+    return "\n\n".join(r["body"] for r in rows)
+
+
+def _claim() -> int | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            """update agent_tasks set status = 'running', started_at = now()
+               where id = (select id from agent_tasks where status = 'queued'
+                           order by queued_at, id for update skip locked limit 1)
+               returning id""").fetchone()
+    return row["id"] if row else None
+
+
+def notify(t: dict) -> None:
+    if not (config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID):
+        return
+    from .telegram import Bot
+    e = html.escape
+    lines = [f"<b>{e(t['channel_name'])}/{e(t['agent_name'])}</b> {t['status']}: {e(t['title'])}"]
+    if t["pr_url"]:
+        lines.append(e(t["pr_url"]))
+    if t["status"] == "failed" and t["error"]:
+        lines.append(e(t["error"][:300]))
+    lines.append(f"{config.PUBLIC_URL}/agents/t/{t['id']}")
+    try:
+        Bot(config.TELEGRAM_BOT_TOKEN).send(int(config.TELEGRAM_CHAT_ID), "\n".join(lines))
+    except Exception:
+        traceback.print_exc()
+
+
+def run_turn(tid: int) -> None:
+    t = task(tid)
+    try:
+        cwd = workspace(t)
+    except subprocess.CalledProcessError as e:
+        _add_message(tid, "system", f"Couldn't get the repo ready: {(e.stderr or '').strip()[-500:]}")
+        _finish(tid, "failed", "workspace")
+        notify(task(tid))
+        return
+    result: list[tuple[bool, str]] = []
+
+    def on_line(line: str) -> None:
+        ev = parse_event(line)
+        if ev["session"] and ev["session"] != t["session_id"]:
+            t["session_id"] = ev["session"]
+            _set(tid, "session_id", ev["session"])
+        for author, body in ev["messages"]:
+            _add_message(tid, author, body)
+        if ev["result"]:
+            result.append(ev["result"])
+
+    outcome = run_claude(build_cmd(t, t["session_id"]), cwd, _prompt(tid), on_line,
+                         lambda: _status(tid) == "cancelled")
+    if outcome == "stopped":
+        _add_message(tid, "system", "Cancelled.")
+        return
+    ok, text = result[-1] if result else (False, outcome)
+    if outcome == "timeout":
+        ok, text = False, f"Stopped after {TIMEOUT // 60} minutes."
+    if ok and t["kind"] == "code" and t["repo_url"]:
+        try:
+            if url := publish(t, cwd):
+                _set(tid, "pr_url", url)
+                _add_message(tid, "system", f"PR: {url}")
+        except subprocess.CalledProcessError as e:
+            ok, text = False, f"Couldn't push or open the PR: {(e.stderr or '').strip()[-500:]}"
+    if not ok:
+        _add_message(tid, "system", text[:1000] or "Failed.")
+    _finish(tid, "done" if ok else "failed", None if ok else text[:500])
+    notify(task(tid))
+
+
+def prune(days: int = 7) -> None:
+    """Free disk: remove workspaces of tasks finished over a week ago. Their branches stay on GitHub,
+    and a later reply makes a fresh worktree from the pushed branch."""
+    with db.connect() as conn:
+        old = [r["id"] for r in conn.execute(
+            "select id from agent_tasks where status not in ('queued', 'running') "
+            "and finished_at < now() - make_interval(days => %s)", (days,))]
+    for tid in old:
+        for d in (WORK / "worktrees" / str(tid), WORK / "scratch" / str(tid)):
+            shutil.rmtree(d, ignore_errors=True)
+    for repo in (WORK / "repos").glob("*"):
+        subprocess.run(["git", "worktree", "prune"], cwd=repo)
+
+
+def run() -> None:
+    WORK.mkdir(parents=True, exist_ok=True)
+    for k, v in (("GIT_AUTHOR_NAME", "life-os agent"), ("GIT_COMMITTER_NAME", "life-os agent"),
+                 ("GIT_AUTHOR_EMAIL", "agent@life-os"), ("GIT_COMMITTER_EMAIL", "agent@life-os")):
+        os.environ.setdefault(k, v)
+    subprocess.run(["gh", "auth", "setup-git"])  # git pushes over https with GH_TOKEN
+    with db.connect() as conn:
+        conn.execute("update agent_tasks set status = 'failed', error = 'runner restarted', "
+                     "finished_at = now() where status = 'running'")
+    print("agents runner started", flush=True)
+    last_prune = 0.0
+    while True:
+        try:
+            if time.monotonic() - last_prune > 24 * 3600:
+                last_prune = time.monotonic()
+                prune()
+            tid = _claim()
+        except Exception:
+            traceback.print_exc()
+            time.sleep(10)
+            continue
+        if tid is None:
+            time.sleep(3)
+            continue
+        print("task", tid, flush=True)
+        try:
+            run_turn(tid)
+        except Exception as e:
+            traceback.print_exc()
+            try:
+                _finish(tid, "failed", repr(e)[:500])
+            except Exception:
+                traceback.print_exc()
+
+
+if __name__ == "__main__":
+    run()

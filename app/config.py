@@ -25,6 +25,9 @@ TZ = ZoneInfo(os.environ.get("TZ_NAME", "Asia/Seoul"))
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # Only this chat may use the bot. Leave empty at first: the bot replies with your chat id.
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# Where the web app is reached from my devices (links in Telegram messages and PRs).
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://lifeos.tail969156.ts.net").rstrip("/")
 # OAuth "Desktop app" client from Google Cloud (Google Auth Platform → Clients).
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
