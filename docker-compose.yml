@@ -27,6 +27,7 @@ services:
   agents:  # Agents tab runner. Its own env file and network: no life-os secrets or web app in reach of the agents' Bash.
     profiles: [agents]  # enable with COMPOSE_PROFILES=telegram,agents in .env, after creating .env.agents
     build: .
+    init: true  # reap processes the agents leave behind
     env_file: .env.agents
     environment: {AGENTS_WORK_DIR: /work}
     command: ["python", "-m", "app.agents"]

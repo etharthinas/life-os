@@ -15,7 +15,7 @@
     {% for m in msgs %}
     <li class="m-{{ m.author }}">
       {% if m.author == "system" %}<span class="hint">{{ m.body }}</span>
-      {% else %}<div class="m-body">{{ m.body | md }}</div>{% endif %}
+      {% else %}<div class="m-body prose">{{ m.body | md }}</div>{% endif %}
     </li>
     {% endfor %}
     {% if t.status == "queued" %}<li class="m-system"><span class="hint">Waiting for its turn…</span></li>

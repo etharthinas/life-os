@@ -169,7 +169,7 @@ def parse_event(line: str) -> dict:
         for b in (ev.get("message") or {}).get("content") or []:
             if not isinstance(b, dict):
                 continue
-            if b.get("type") == "text" and b.get("text", "").strip():
+            if b.get("type") == "text" and isinstance(b.get("text"), str) and b["text"].strip():
                 out["messages"].append(("agent", b["text"].strip()))
             elif b.get("type") == "tool_use":
                 out["messages"].append(("system", _tool_line(b.get("name", "?"), b.get("input") or {})))
