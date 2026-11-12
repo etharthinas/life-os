@@ -52,6 +52,26 @@ Setup on the VM (once):
    the repos agents may touch.
 3. Swap, since the box has 1 GB: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`,
    plus `/swapfile none swap sw 0 0` in `/etc/fstab`.
-4. `docker compose up -d --build`.
+4. Firewall, so agents can't reach the tailnet, the host (`tailscale serve` on :443) or Lightsail
+   metadata. The `agents` network is `172.30.0.0/24` (docker-compose.yml) and isn't the one `web`
+   is on. Put the host's own addresses (`hostname -I`, plus its tailnet IP) in place of `<host-ip>`:
+   ```sh
+   sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -d 100.64.0.0/10 -j DROP
+   sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -d 169.254.169.254 -j DROP
+   sudo iptables -I INPUT -s 172.30.0.0/24 -d <host-ip> -j DROP   # once per host address
+   sudo apt install iptables-persistent && sudo netfilter-persistent save   # keep them after reboot
+   ```
+   Check after step 5: `docker compose exec agents curl -m 5 http://web:8000` should fail to
+   resolve, and `docker compose exec agents curl -m 5 http://<tailnet-ip>` should time out.
+5. Add `agents` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=telegram,agents`), then
+   `docker compose up -d --build`.
 
 Logs: `docker compose logs -f agents`.
+
+Security notes:
+- Give agents a **separate Telegram bot**. An agent can read its env, and with the main bot's token
+  it could take over the capture bot's `getUpdates`.
+- Turn on branch protection (or a ruleset) on the default branch of every repo the GitHub token
+  can reach: the token can push to main.
+- Treat everything in `.env.agents` as readable by any agent.
+- Changing a channel's repo URL after its first task: remove `/work/repos/<channel id>` first.

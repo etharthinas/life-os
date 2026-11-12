@@ -1,7 +1,7 @@
 {% set live = t.status in ("queued", "running") %}
 <div id="agent-thread" class="section"
      {% if live %}hx-get="/agents/t/{{ t.id }}/messages" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
-  <p class="agent-meta">
+  <div class="agent-meta">
     <span class="agent-status s-{{ t.status }}">{{ t.status }}</span>
     @{{ t.agent_name }}
     {% if t.pr_url %}· <a href="{{ t.pr_url }}" target="_blank" rel="noopener">PR</a>{% endif %}
@@ -9,7 +9,8 @@
     {% if live %}
     <form method="post" action="/agents/t/{{ t.id }}/cancel" class="inline"><button class="btn btn-quiet">Cancel</button></form>
     {% endif %}
-  </p>
+  </div>
+  {% if t.status == "failed" and t.error %}<p class="hint">Failed: {{ t.error }}</p>{% endif %}
   <ol class="agent-msgs">
     {% for m in msgs %}
     <li class="m-{{ m.author }}">

@@ -27,6 +27,8 @@ create table agent_tasks (
   session_id text,
   pr_url text,
   error text,
+  last_prompt_id bigint,              -- the last of my messages sent to the agent
+
   queued_at timestamptz not null default now(),
   started_at timestamptz,
   finished_at timestamptz,
@@ -43,10 +45,26 @@ create table agent_messages (
 );
 create index agent_messages_task on agent_messages (task_id, id);
 
+-- Supabase exposes public over PostgREST: RLS with no policies (and no grants) keeps these private.
+-- The app connects as the table owner, which bypasses RLS.
+alter table agent_channels enable row level security;
+alter table agents enable row level security;
+alter table agent_tasks enable row level security;
+alter table agent_messages enable row level security;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then  -- not on the local dev DB
+    revoke all on agent_channels, agents, agent_tasks, agent_messages from anon, authenticated;
+  end if;
+end $$;
+
 -- The agents container connects as a role that can only touch these tables. Run once, by hand,
 -- as the owner (Supabase SQL editor), with a real password:
 --   create role agents_runner login password '...';
 --   grant usage on schema public to agents_runner;
 --   grant select on agent_channels, agents to agents_runner;
 --   grant select, insert, update on agent_tasks, agent_messages to agents_runner;
+--   create policy agents_runner_all on agent_channels to agents_runner using (true) with check (true);
+--   create policy agents_runner_all on agents to agents_runner using (true) with check (true);
+--   create policy agents_runner_all on agent_tasks to agents_runner using (true) with check (true);
+--   create policy agents_runner_all on agent_messages to agents_runner using (true) with check (true);
 -- Supabase session pooler user name: agents_runner.<project ref>

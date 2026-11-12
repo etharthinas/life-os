@@ -106,17 +106,18 @@ def start_task(agent_id: int, text: str) -> int:
     return tid
 
 
-def reply(tid: int, text: str) -> bool:
-    """A follow-up in the thread: queued as the next turn of the same session. Not while running."""
+def reply(tid: int, text: str) -> None:
+    """A follow-up in the thread: the next turn of the same session. While a turn runs it waits,
+    and `_finish` queues it when that turn ends."""
     with db.connect() as conn, conn.transaction():
         row = conn.execute("select status from agent_tasks where id = %s for update", (tid,)).fetchone()
-        if not row or row["status"] == "running":
-            return False
+        if not row:
+            return
         conn.execute("insert into agent_messages (task_id, author, body) values (%s, 'me', %s)",
                      (tid, text.strip()))
-        conn.execute("update agent_tasks set status = 'queued', queued_at = now(), error = null, "
-                     "finished_at = null where id = %s and status <> 'queued'", (tid,))
-    return True
+        if row["status"] != "running":
+            conn.execute("update agent_tasks set status = 'queued', queued_at = now(), error = null, "
+                         "finished_at = null where id = %s and status <> 'queued'", (tid,))
 
 
 def cancel(tid: int) -> None:
@@ -160,10 +161,14 @@ def parse_event(line: str) -> dict:
         ev = json.loads(line)
     except json.JSONDecodeError:
         return out
+    if not isinstance(ev, dict):
+        return out
     if ev.get("type") == "system" and ev.get("subtype") == "init":
         out["session"] = ev.get("session_id")
     elif ev.get("type") == "assistant":
         for b in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict):
+                continue
             if b.get("type") == "text" and b.get("text", "").strip():
                 out["messages"].append(("agent", b["text"].strip()))
             elif b.get("type") == "tool_use":
@@ -193,16 +198,25 @@ def run_claude(cmd, cwd, prompt: str, on_line, should_stop, timeout: int = TIMEO
             elif time.monotonic() > end:
                 why.append("timeout")
             if why:
-                os.killpg(proc.pid, signal.SIGKILL)  # the whole group: claude's own children too
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)  # the whole group: claude's own children too
+                except (ProcessLookupError, PermissionError):
+                    pass
                 return
             time.sleep(1)
 
     threading.Thread(target=watch, daemon=True).start()
     tail = deque(maxlen=10)
-    for line in proc.stdout:
-        tail.append(line)
-        on_line(line)
-    proc.wait()
+    try:
+        for line in proc.stdout:
+            tail.append(line)
+            on_line(line)
+    finally:  # always: also ends whatever the agent left running in the background
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):  # gone; macOS says EPERM for a zombie group
+            pass
+        proc.wait()
     if why:
         return why[0]
     return "ok" if proc.returncode == 0 else f"exit {proc.returncode}: {''.join(tail)[-500:]}"
@@ -212,7 +226,8 @@ WORK = Path(os.environ.get("AGENTS_WORK_DIR", "/work"))
 
 
 def _git(*args, cwd) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+                          timeout=300).stdout.strip()
 
 
 def workspace(t: dict) -> Path:
@@ -245,12 +260,12 @@ def publish(t: dict, wt: Path) -> str | None:
     branch = f"agent/{t['id']}"
     _git("push", "-f", "origin", f"HEAD:refs/heads/{branch}", cwd=wt)
     seen = subprocess.run(["gh", "pr", "view", branch, "--json", "url", "-q", ".url"], cwd=wt,
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, timeout=300)
     if seen.returncode == 0 and seen.stdout.strip():
         return seen.stdout.strip()
     out = subprocess.run(["gh", "pr", "create", "--head", branch, "--base", t["default_branch"],
                           "--title", t["title"], "--body", f"Asked for in life-os: {config.PUBLIC_URL}/agents/t/{t['id']}"],
-                         cwd=wt, check=True, capture_output=True, text=True).stdout
+                         cwd=wt, check=True, capture_output=True, text=True, timeout=300).stdout
     m = re.search(r"https://\S+/pull/\d+", out)
     return m[0] if m else out.strip()
 
@@ -271,20 +286,41 @@ def _status(tid: int) -> str:
         return conn.execute("select status from agent_tasks where id = %s", (tid,)).fetchone()["status"]
 
 
-def _finish(tid: int, status: str, error: str | None = None) -> None:
-    with db.connect() as conn:  # a cancel that came in meanwhile stays a cancel
-        conn.execute("update agent_tasks set status = %s, error = %s, finished_at = now() "
-                     "where id = %s and status = 'running'", (status, error, tid))
+def _finish(tid: int, status: str, error: str | None = None, requeue: bool = True) -> bool:
+    """End the running turn. A reply that came in during it queues the next turn instead (when
+    `requeue`). Returns True when the task really ended (time to notify)."""
+    with db.connect() as conn, conn.transaction():  # a cancel that came in meanwhile stays a cancel
+        row = conn.execute("select last_prompt_id from agent_tasks where id = %s and status = 'running' "
+                           "for update", (tid,)).fetchone()
+        if not row:
+            return False
+        if requeue and conn.execute(
+                "select 1 from agent_messages where task_id = %s and author = 'me' and id > %s limit 1",
+                (tid, row["last_prompt_id"] or 0)).fetchone():
+            conn.execute("update agent_tasks set status = 'queued', queued_at = now() where id = %s", (tid,))
+            return False
+        conn.execute("update agent_tasks set status = %s, error = %s, finished_at = now() where id = %s",
+                     (status, error, tid))
+        return True
 
 
 def _prompt(tid: int) -> str:
-    """What I've said since the agent last spoke: the request, or the follow-ups."""
-    with db.connect() as conn:
-        rows = conn.execute(
-            """select body from agent_messages where task_id = %s and author = 'me' and id >
-                 coalesce((select max(id) from agent_messages where task_id = %s and author <> 'me'), 0)
-               order by id""", (tid, tid)).fetchall()
+    """My messages the agent hasn't been given yet. Before there's a session (first turn, or a retry
+    after it failed): all of them, so the original request isn't lost."""
+    with db.connect() as conn, conn.transaction():
+        t = conn.execute("select session_id, last_prompt_id from agent_tasks where id = %s", (tid,)).fetchone()
+        after = (t["last_prompt_id"] or 0) if t["session_id"] else 0
+        rows = conn.execute("select id, body from agent_messages where task_id = %s and author = 'me' "
+                            "and id > %s order by id", (tid, after)).fetchall()
+        if rows:
+            conn.execute("update agent_tasks set last_prompt_id = %s where id = %s", (rows[-1]["id"], tid))
     return "\n\n".join(r["body"] for r in rows)
+
+
+def _err(e: Exception) -> str:
+    if isinstance(e, subprocess.TimeoutExpired):
+        return f"`{' '.join(map(str, e.cmd[:3]))}` took over {e.timeout:.0f}s"
+    return (e.stderr or "").strip()[-500:]
 
 
 def _claim() -> int | None:
@@ -318,10 +354,10 @@ def run_turn(tid: int) -> None:
     t = task(tid)
     try:
         cwd = workspace(t)
-    except subprocess.CalledProcessError as e:
-        _add_message(tid, "system", f"Couldn't get the repo ready: {(e.stderr or '').strip()[-500:]}")
-        _finish(tid, "failed", "workspace")
-        notify(task(tid))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        _add_message(tid, "system", f"Couldn't get the repo ready: {_err(e)}")
+        if _finish(tid, "failed", "workspace", requeue=False):
+            notify(task(tid))
         return
     result: list[tuple[bool, str]] = []
 
@@ -336,7 +372,7 @@ def run_turn(tid: int) -> None:
             result.append(ev["result"])
 
     outcome = run_claude(build_cmd(t, t["session_id"]), cwd, _prompt(tid), on_line,
-                         lambda: _status(tid) == "cancelled")
+                         lambda: _status(tid) != "running")
     if outcome == "stopped":
         _add_message(tid, "system", "Cancelled.")
         return
@@ -348,12 +384,12 @@ def run_turn(tid: int) -> None:
             if url := publish(t, cwd):
                 _set(tid, "pr_url", url)
                 _add_message(tid, "system", f"PR: {url}")
-        except subprocess.CalledProcessError as e:
-            ok, text = False, f"Couldn't push or open the PR: {(e.stderr or '').strip()[-500:]}"
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            ok, text = False, f"Couldn't push or open the PR: {_err(e)}"
     if not ok:
         _add_message(tid, "system", text[:1000] or "Failed.")
-    _finish(tid, "done" if ok else "failed", None if ok else text[:500])
-    notify(task(tid))
+    if _finish(tid, "done" if ok else "failed", None if ok else text[:500]):
+        notify(task(tid))
 
 
 def prune(days: int = 7) -> None:
@@ -375,6 +411,7 @@ def run() -> None:
     for k, v in (("GIT_AUTHOR_NAME", "life-os agent"), ("GIT_COMMITTER_NAME", "life-os agent"),
                  ("GIT_AUTHOR_EMAIL", "agent@life-os"), ("GIT_COMMITTER_EMAIL", "agent@life-os")):
         os.environ.setdefault(k, v)
+    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")  # a git that wants a password fails, not hangs
     subprocess.run(["gh", "auth", "setup-git"])  # git pushes over https with GH_TOKEN
     with db.connect() as conn:
         conn.execute("update agent_tasks set status = 'failed', error = 'runner restarted', "
@@ -400,7 +437,7 @@ def run() -> None:
         except Exception as e:
             traceback.print_exc()
             try:
-                _finish(tid, "failed", repr(e)[:500])
+                _finish(tid, "failed", repr(e)[:500], requeue=False)
             except Exception:
                 traceback.print_exc()
 

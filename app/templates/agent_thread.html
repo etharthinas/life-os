@@ -7,7 +7,7 @@
 {% include "_agent_thread.html" %}
 <form class="composer agent-composer" method="post" action="/agents/t/{{ t.id }}/reply">
   <textarea name="text" rows="2" required placeholder="Reply to @{{ t.agent_name }}…"></textarea>
-  <div class="actions"><span class="hint">Continues the same session. ⌘⏎ to send.</span><button class="btn btn-primary">Send</button></div>
+  <div class="actions"><span class="hint">{% if t.status in ("queued", "running") %}Sent after the current turn finishes.{% else %}Continues the same session.{% endif %} ⌘⏎ to send.</span><button class="btn btn-primary">Send</button></div>
 </form>
 {% include "_agent_send.html" %}
 <script>

@@ -1142,7 +1142,7 @@ def agents_new_channel(name: str = Form(...), repo_url: str = Form(""), default_
 def agents_channel(request: Request, cid: int):
     ch = _or_404(agents.channel(cid))
     return _render(request, "agent_channel.html", ch=ch, members=agents.channel_agents(cid),
-                   tasks=agents.channel_tasks(cid), channels=agents.channels())
+                   tasks=agents.channel_tasks(cid))
 
 
 @app.post("/agents/c/{cid}")
@@ -1166,8 +1166,10 @@ def agents_save_agent(cid: int, name: str = Form(...), kind: str = Form("code"),
 def agents_new_task(cid: int, text: str = Form(...)):
     _or_404(agents.channel(cid))
     agent, text = agents.pick_agent(agents.channel_agents(cid), text.strip())
-    if agent is None or not text:
+    if agent is None:
         raise HTTPException(400, "Add an agent to this channel first")
+    if not text:
+        raise HTTPException(400, "Write what the agent should do")
     return RedirectResponse(f"/agents/t/{agents.start_task(agent['id'], text)}", status_code=303)
 
 
@@ -1188,8 +1190,10 @@ def agents_thread_messages(request: Request, tid: int):
 
 @app.post("/agents/t/{tid}/reply")
 def agents_reply(tid: int, text: str = Form(...)):
-    if not text.strip() or not agents.reply(tid, text):
-        raise HTTPException(409, "Still running: wait for it, or cancel")
+    _or_404(agents.task(tid))
+    if not text.strip():
+        raise HTTPException(400, "The reply is empty")
+    agents.reply(tid, text)
     return RedirectResponse(f"/agents/t/{tid}", status_code=303)
 
 

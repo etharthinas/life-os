@@ -24,7 +24,8 @@ services:
     command: ["python", "-m", "app.telegram"]
     restart: unless-stopped
     logging: *logging
-  agents:  # Agents tab runner. Its own env file: no life-os secrets in reach of the agents' Bash.
+  agents:  # Agents tab runner. Its own env file and network: no life-os secrets or web app in reach of the agents' Bash.
+    profiles: [agents]  # enable with COMPOSE_PROFILES=telegram,agents in .env, after creating .env.agents
     build: .
     env_file: .env.agents
     environment: {AGENTS_WORK_DIR: /work}
@@ -33,8 +34,13 @@ services:
     volumes:
       - agents-work:/work            # repos and worktrees
       - agents-home:/home/agent      # ~/.claude (sessions for --resume), git/gh config
+    networks: [agents]               # not the default network: `web` (no auth) is unreachable
     restart: unless-stopped
     logging: *logging
+
+networks:
+  agents:  # fixed subnet for the host firewall rules in the README
+    ipam: {config: [{subnet: 172.30.0.0/24}]}
 
 volumes:
   agents-work:

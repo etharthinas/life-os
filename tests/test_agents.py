@@ -40,6 +40,9 @@ def test_parse_event():
     assert agents.parse_event('{"type":"result","subtype":"success","is_error":false,"result":"hi"}')["result"] == (True, "hi")
     assert agents.parse_event('{"type":"result","subtype":"success","is_error":true,"result":"limit"}')["result"] == (False, "limit")
     assert agents.parse_event("not json") == {"session": None, "messages": [], "result": None}
+    assert agents.parse_event("[1]") == agents.parse_event("not json")
+    ev = agents.parse_event('{"type":"assistant","message":{"content":["x",{"type":"text","text":"y"}]}}')
+    assert ev["messages"] == [("agent", "y")]
 
 
 def _script(tmp_path, body):
@@ -67,6 +70,35 @@ def test_run_claude_stop_and_timeout(tmp_path):
     assert agents.run_claude(cmd, tmp_path, "", lambda _: None, lambda: True) == "stopped"
     assert agents.run_claude(cmd, tmp_path, "", lambda _: None, lambda: False, timeout=1) == "timeout"
     assert time.monotonic() - t0 < 10
+
+
+def test_run_claude_kills_group_when_on_line_raises(tmp_path):
+    # the agent's background child must not outlive the turn when the reader blows up
+    cmd = _script(tmp_path, f"""\
+        sleep 30 &
+        echo $! > {tmp_path}/bg
+        echo hi
+        wait
+        """)
+
+    def boom(_):
+        raise RuntimeError("db down")
+
+    t0 = time.monotonic()
+    try:
+        agents.run_claude(cmd, tmp_path, "", boom, lambda: False)
+        raise AssertionError("should re-raise")
+    except RuntimeError:
+        pass
+    assert time.monotonic() - t0 < 5
+    bg = int((tmp_path / "bg").read_text())
+    time.sleep(0.2)
+    try:
+        os.kill(bg, 0)
+        alive = True
+    except ProcessLookupError:
+        alive = False
+    assert not alive
 
 
 def test_run_claude_exit_code(tmp_path):
