@@ -7,7 +7,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 .venv/bin/python -m pytest -q tests
 rsync -az --delete \
-  --exclude .venv/ --exclude .dev/ --exclude desktop/ --exclude .env --exclude crew/ --exclude .pytest_cache/ \
+  --exclude .venv/ --exclude .dev/ --exclude desktop/ --exclude .env --exclude .env.agents --exclude crew/ --exclude .pytest_cache/ \
   --exclude __pycache__/ --exclude .DS_Store --exclude '*.pem' \
   ./ lifeos:/srv/life-os/
 if [ "$1" = "--env" ]; then

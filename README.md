@@ -53,16 +53,14 @@ Setup on the VM (once):
 3. Swap, since the box has 1 GB: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`,
    plus `/swapfile none swap sw 0 0` in `/etc/fstab`.
 4. Firewall, so agents can't reach the tailnet, the host (`tailscale serve` on :443) or Lightsail
-   metadata. The `agents` network is `172.30.0.0/24` (docker-compose.yml) and isn't the one `web`
-   is on. Put the host's own addresses (`hostname -I`, plus its tailnet IP) in place of `<host-ip>`:
+   metadata. The `agents` network is `172.30.0.0/24` (docker-compose.yml). On the VM this is the
+   systemd unit `agents-firewall.service` (enabled, runs after docker), which adds:
    ```sh
-   sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -d 100.64.0.0/10 -j DROP
-   sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -d 169.254.169.254 -j DROP
-   sudo iptables -I INPUT -s 172.30.0.0/24 -d <host-ip> -j DROP   # once per host address
-   sudo apt install iptables-persistent && sudo netfilter-persistent save   # keep them after reboot
+   iptables -I DOCKER-USER -s 172.30.0.0/24 -d 100.64.0.0/10 -j DROP
+   iptables -I DOCKER-USER -s 172.30.0.0/24 -d 169.254.169.254 -j DROP
+   iptables -I INPUT -s 172.30.0.0/24 -j DROP   # every host address, incl. the bridge gateway
    ```
-   Check after step 5: `docker compose exec agents curl -m 5 http://web:8000` should fail to
-   resolve, and `docker compose exec agents curl -m 5 http://<tailnet-ip>` should time out.
+   Check: from the agents container, `web` doesn't resolve and the host/tailnet IPs time out.
 5. Add `agents` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=telegram,agents`), then
    `docker compose up -d --build`.
 
